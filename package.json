@@ -1,0 +1,40 @@
+{
+  "name": "qamrec-screen-recorder",
+  "version": "1.0.0",
+  "description": "Free & open-source screen and camera recorder Chrome extension",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build && node scripts/copy-extension-files.js",
+    "typecheck": "tsc --noEmit",
+    "preview": "vite preview",
+    "icons": "node scripts/generate-icons.js",
+    "zip": "cd dist && zip -r ../qamrec-extension.zip ."
+  },
+  "keywords": [
+    "screen-recorder",
+    "chrome-extension",
+    "camera-recorder",
+    "webm",
+    "react"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "gifenc": "^1.0.3",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.260",
+    "@types/react": "^18.2.48",
+    "@types/react-dom": "^18.2.18",
+    "@vitejs/plugin-react": "^4.2.1",
+    "autoprefixer": "^10.4.17",
+    "canvas": "^3.2.0",
+    "postcss": "^8.4.33",
+    "tailwindcss": "^3.4.1",
+    "typescript": "^5.3.3",
+    "vite": "^5.0.12"
+  }
+}
