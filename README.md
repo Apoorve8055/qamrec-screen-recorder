@@ -1,4 +1,4 @@
-# Qamrec Screen Recorder
+# <img src="public/icons/icon48.png" width="32" height="32" alt="Qamrec"> Qamrec Screen Recorder
 
 A free, open-source, and privacy-focused screen and camera recorder Chrome extension. Record your screen, webcam, or both with picture-in-picture mode - all recordings stay on your device.
 
