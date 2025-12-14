@@ -23,7 +23,7 @@ export async function downloadBlob(
   extension: string = 'webm'
 ): Promise<number> {
   const url = URL.createObjectURL(blob);
-  const finalFilename = filename || generateFilename('recording', extension);
+  const finalFilename = filename || generateFilename('qamrec-recording', extension);
 
   return new Promise((resolve, reject) => {
     chrome.downloads.download(
@@ -59,7 +59,7 @@ export function downloadBlobFallback(
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = filename || generateFilename('recording', extension);
+  a.download = filename || generateFilename('qamrec-recording', extension);
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
