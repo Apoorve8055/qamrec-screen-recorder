@@ -113,10 +113,10 @@ export function useStreamMerger(options: UseStreamMergerOptions = {}): UseStream
 
       // Start drawing when screen video is playing
       screenVideo.onplaying = () => {
-        cameraVideo.play().then(setupCanvas).catch(console.error);
+        cameraVideo.play().then(setupCanvas).catch(() => {});
       };
 
-      screenVideo.play().catch(console.error);
+      screenVideo.play().catch(() => {});
 
       // Combine canvas stream with audio from both sources
       const canvasStream = canvas.captureStream(frameRate);

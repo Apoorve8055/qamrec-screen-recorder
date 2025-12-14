@@ -104,7 +104,6 @@ export function useMediaRecorder(options: UseMediaRecorderOptions = {}): UseMedi
         formatRef.current = recordFormat;
         setFormat(recordFormat);
 
-        console.log(`Recording with MIME type: ${mimeType} (${recordFormat})`);
 
         const recorder = new MediaRecorder(stream, {
           mimeType,

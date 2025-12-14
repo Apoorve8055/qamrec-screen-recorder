@@ -41,12 +41,3 @@ export type FeatureKey = keyof typeof FEATURES;
 export function isFeatureEnabled(feature: FeatureKey): boolean {
   return FEATURES[feature];
 }
-
-/**
- * Get all enabled features
- */
-export function getEnabledFeatures(): FeatureKey[] {
-  return (Object.keys(FEATURES) as FeatureKey[]).filter(
-    (key) => FEATURES[key]
-  );
-}

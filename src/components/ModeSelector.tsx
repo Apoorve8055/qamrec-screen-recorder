@@ -1,5 +1,6 @@
 import React from 'react';
 import { FEATURES, isFeatureEnabled } from '../config/features';
+import { ScreenIcon, CameraIcon, PipIcon } from './Icons';
 import type { RecordingMode } from '../types';
 
 interface ModeSelectorProps {
@@ -17,19 +18,19 @@ export function ModeSelector({
     {
       mode: 'screen',
       label: 'Screen',
-      icon: <ScreenIcon />,
+      icon: <ScreenIcon className="w-6 h-6" />,
       feature: 'SCREEN_RECORDING',
     },
     {
       mode: 'camera',
       label: 'Camera',
-      icon: <CameraIcon />,
+      icon: <CameraIcon className="w-6 h-6" />,
       feature: 'CAMERA_RECORDING',
     },
     {
       mode: 'screen-camera',
       label: 'Screen + Camera',
-      icon: <PipIcon />,
+      icon: <PipIcon className="w-6 h-6" />,
       feature: 'SCREEN_CAMERA',
     },
   ];
@@ -61,44 +62,5 @@ export function ModeSelector({
         </button>
       ))}
     </div>
-  );
-}
-
-function ScreenIcon() {
-  return (
-    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={2}
-        d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
-      />
-    </svg>
-  );
-}
-
-function CameraIcon() {
-  return (
-    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={2}
-        d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
-      />
-    </svg>
-  );
-}
-
-function PipIcon() {
-  return (
-    <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={2}
-        d="M4 6h16M4 10h16M4 14h10m-10 4h6m4-4h4a1 1 0 011 1v3a1 1 0 01-1 1h-4a1 1 0 01-1-1v-3a1 1 0 011-1z"
-      />
-    </svg>
   );
 }

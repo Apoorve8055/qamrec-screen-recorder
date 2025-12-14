@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useMediaRecorder, type RecordingFormat } from './useMediaRecorder';
 import { useStreamMerger } from './useStreamMerger';
-import { downloadBlob, downloadBlobFallback, formatFileSize } from '../utils/download';
+import { downloadBlob, downloadBlobFallback } from '../utils/download';
 import { convertToGif, convertToWebm, type ConversionProgress, type VideoResolution } from '../utils/convert';
+import { formatDuration, formatFileSize } from '../utils/format';
+import { PauseIcon, PlayIcon, StopIcon, RefreshIcon } from '../components/Icons';
 import { FEATURES } from '../config/features';
 import type { RecordingMode } from '../types';
 
@@ -231,18 +233,6 @@ export function RecorderPage() {
     handleStartCapture(mode);
   };
 
-  const formatDuration = (ms: number) => {
-    const totalSeconds = Math.floor(ms / 1000);
-    const hours = Math.floor(totalSeconds / 3600);
-    const minutes = Math.floor((totalSeconds % 3600) / 60);
-    const seconds = totalSeconds % 60;
-
-    if (hours > 0) {
-      return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-    }
-    return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-  };
-
   return (
     <div className="min-h-screen bg-gray-900 text-white">
       {/* Hidden canvas for stream merging */}
@@ -446,35 +436,3 @@ export function RecorderPage() {
   );
 }
 
-// Icons
-function PauseIcon() {
-  return (
-    <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-      <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
-    </svg>
-  );
-}
-
-function PlayIcon() {
-  return (
-    <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-      <path d="M8 5v14l11-7z" />
-    </svg>
-  );
-}
-
-function StopIcon() {
-  return (
-    <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
-      <path d="M6 6h12v12H6z" />
-    </svg>
-  );
-}
-
-function RefreshIcon() {
-  return (
-    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-    </svg>
-  );
-}

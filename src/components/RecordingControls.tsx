@@ -1,3 +1,6 @@
+import { PlayIcon, PauseIcon, StopIcon } from './Icons';
+import { formatDuration } from '../utils/format';
+
 interface RecordingControlsProps {
   isRecording: boolean;
   isPaused: boolean;
@@ -15,22 +18,6 @@ export function RecordingControls({
   onResume,
   onStop,
 }: RecordingControlsProps) {
-  const formatDuration = (ms: number) => {
-    const totalSeconds = Math.floor(ms / 1000);
-    const hours = Math.floor(totalSeconds / 3600);
-    const minutes = Math.floor((totalSeconds % 3600) / 60);
-    const seconds = totalSeconds % 60;
-
-    if (hours > 0) {
-      return `${hours.toString().padStart(2, '0')}:${minutes
-        .toString()
-        .padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-    }
-    return `${minutes.toString().padStart(2, '0')}:${seconds
-      .toString()
-      .padStart(2, '0')}`;
-  };
-
   if (!isRecording && !isPaused) {
     return null;
   }
@@ -83,29 +70,5 @@ export function RecordingControls({
         </button>
       </div>
     </div>
-  );
-}
-
-function PlayIcon() {
-  return (
-    <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-      <path d="M8 5v14l11-7z" />
-    </svg>
-  );
-}
-
-function PauseIcon() {
-  return (
-    <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-      <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
-    </svg>
-  );
-}
-
-function StopIcon() {
-  return (
-    <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-      <path d="M6 6h12v12H6z" />
-    </svg>
   );
 }

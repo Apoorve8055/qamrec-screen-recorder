@@ -111,13 +111,6 @@ chrome.windows.onRemoved.addListener((windowId) => {
 /**
  * Extension install/update handler
  */
-chrome.runtime.onInstalled.addListener((details) => {
-  if (details.reason === 'install') {
-    console.log('Qamrec Screen Recorder installed!');
-  } else if (details.reason === 'update') {
-    console.log('Qamrec Screen Recorder updated to version', chrome.runtime.getManifest().version);
-  }
+chrome.runtime.onInstalled.addListener(() => {
+  // Extension installed or updated
 });
-
-// Log service worker activation
-console.log('Qamrec background service worker started');

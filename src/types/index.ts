@@ -42,14 +42,6 @@ export interface RecordingStatus {
 }
 
 /**
- * Media stream configuration
- */
-export interface StreamConfig {
-  video: boolean | MediaTrackConstraints;
-  audio: boolean | MediaTrackConstraints;
-}
-
-/**
  * PiP (Picture-in-Picture) overlay configuration
  */
 export interface PipConfig {

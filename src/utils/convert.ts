@@ -7,9 +7,6 @@ export type ConversionProgress = {
 
 export type VideoResolution = 'original' | 1080 | 720 | 480;
 
-// Keep GifResolution as alias for backwards compatibility
-export type GifResolution = VideoResolution;
-
 /**
  * Convert a video blob to GIF using gifenc
  * Extracts frames from video and encodes them to GIF
@@ -17,7 +14,7 @@ export type GifResolution = VideoResolution;
 export async function convertToGif(
   videoBlob: Blob,
   onProgress?: (progress: ConversionProgress) => void,
-  resolution: GifResolution = 'original'
+  resolution: VideoResolution = 'original'
 ): Promise<Blob> {
   onProgress?.({ phase: 'extracting', progress: 0 });
 

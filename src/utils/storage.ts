@@ -18,26 +18,6 @@ export const STORAGE_KEYS = {
 type StorageKey = typeof STORAGE_KEYS[keyof typeof STORAGE_KEYS];
 
 /**
- * Get a value from chrome.storage.local
- */
-export async function getStorageValue<T>(key: StorageKey, defaultValue: T): Promise<T> {
-  return new Promise((resolve) => {
-    chrome.storage.local.get([key], (result) => {
-      resolve(result[key] !== undefined ? result[key] : defaultValue);
-    });
-  });
-}
-
-/**
- * Set a value in chrome.storage.local
- */
-export async function setStorageValue<T>(key: StorageKey, value: T): Promise<void> {
-  return new Promise((resolve) => {
-    chrome.storage.local.set({ [key]: value }, resolve);
-  });
-}
-
-/**
  * Get multiple values from chrome.storage.local
  */
 export async function getStorageValues<T extends Record<string, unknown>>(
@@ -47,15 +27,6 @@ export async function getStorageValues<T extends Record<string, unknown>>(
     chrome.storage.local.get(keys, (result) => {
       resolve(result as Partial<T>);
     });
-  });
-}
-
-/**
- * Clear all extension storage
- */
-export async function clearStorage(): Promise<void> {
-  return new Promise((resolve) => {
-    chrome.storage.local.clear(resolve);
   });
 }
 
