@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { isFeatureEnabled } from '../config/features';
 import { ScreenIcon, CameraIcon, PipIcon, GithubIcon, GlobeIcon } from '../components/Icons';
 import { formatDuration } from '../utils/format';
-import { checkPermission, requestCameraPermission, requestMicrophonePermission } from '../utils/permissions';
 import type { RecordingMode, RecordingStatus } from '../types';
 
 export function Popup() {
@@ -25,36 +24,6 @@ export function Popup() {
     setIsRequesting(true);
 
     try {
-      // Determine required permissions based on mode and options
-      const needsCamera = mode === 'camera' || mode === 'screen-camera';
-      const needsMic = includeMic || (mode === 'camera' && includeAudio);
-
-      // Check and request camera permission if needed
-      if (needsCamera) {
-        const cameraGranted = await checkPermission('camera');
-        if (!cameraGranted) {
-          const granted = await requestCameraPermission();
-          if (!granted) {
-            setError('Camera permission denied');
-            setIsRequesting(false);
-            return;
-          }
-        }
-      }
-
-      // Check and request microphone permission if needed
-      if (needsMic) {
-        const micGranted = await checkPermission('microphone');
-        if (!micGranted) {
-          const granted = await requestMicrophonePermission();
-          if (!granted) {
-            setError('Microphone permission denied');
-            setIsRequesting(false);
-            return;
-          }
-        }
-      }
-
       // All permissions granted - open recorder
       chrome.runtime.sendMessage({
         type: 'OPEN_RECORDER',
