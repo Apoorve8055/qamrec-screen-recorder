@@ -22,20 +22,9 @@
   },
   "permissions": [
     "storage",
-    "downloads",
-    "tabs",
-    "desktopCapture"
-  ],
-  "host_permissions": [
-    "<all_urls>"
+    "downloads"
   ],
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
-  },
-  "web_accessible_resources": [
-    {
-      "resources": ["recorder.html", "ffmpeg/*"],
-      "matches": ["<all_urls>"]
-    }
-  ]
+  }
 }

@@ -2,7 +2,7 @@
  * Post-build script to copy extension files to dist
  */
 
-import { copyFileSync, mkdirSync, existsSync, readFileSync, writeFileSync, readdirSync } from 'fs';
+import { copyFileSync, mkdirSync, existsSync, readFileSync, writeFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -27,22 +27,6 @@ for (const size of iconSizes) {
   }
 }
 
-// Copy ffmpeg folder
-const ffmpegSrcDir = join(rootDir, 'public', 'ffmpeg');
-const ffmpegDistDir = join(distDir, 'ffmpeg');
-if (existsSync(ffmpegSrcDir)) {
-  if (!existsSync(ffmpegDistDir)) {
-    mkdirSync(ffmpegDistDir, { recursive: true });
-  }
-  const ffmpegFiles = readdirSync(ffmpegSrcDir);
-  for (const file of ffmpegFiles) {
-    const src = join(ffmpegSrcDir, file);
-    const dest = join(ffmpegDistDir, file);
-    copyFileSync(src, dest);
-    console.log(`Copied: ffmpeg/${file}`);
-  }
-}
-
 // Read and modify manifest for production
 const manifestSrc = join(rootDir, 'manifest.json');
 const manifest = JSON.parse(readFileSync(manifestSrc, 'utf-8'));
@@ -50,12 +34,6 @@ const manifest = JSON.parse(readFileSync(manifestSrc, 'utf-8'));
 // Update paths for production build
 manifest.action.default_popup = 'popup.html';
 manifest.background.service_worker = 'background.js';
-manifest.web_accessible_resources = [
-  {
-    resources: ['recorder.html', 'assets/*', 'ffmpeg/*'],
-    matches: ['<all_urls>']
-  }
-];
 
 // Write modified manifest
 writeFileSync(join(distDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
