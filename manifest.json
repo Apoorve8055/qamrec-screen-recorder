@@ -21,7 +21,6 @@
     "type": "module"
   },
   "permissions": [
-    "storage",
     "downloads"
   ],
   "content_security_policy": {
