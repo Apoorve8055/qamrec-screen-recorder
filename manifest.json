@@ -1,8 +1,9 @@
 {
   "manifest_version": 3,
   "name": "Qamrec Screen Recorder",
-  "version": "1.0.0",
-  "description": "Free & open-source screen and camera recorder. Record your screen, camera, or both with picture-in-picture mode.",
+  "version": "2.0.0",
+  "description": "Free, private, cinematic screen recorder: auto-zoom on clicks, cursor effects, keystrokes, webcam styling, trim and MP4/WebM/GIF export. All local.",
+  "minimum_chrome_version": "116",
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
@@ -21,8 +22,26 @@
     "type": "module"
   },
   "permissions": [
-    "downloads"
+    "activeTab",
+    "downloads",
+    "scripting",
+    "storage",
+    "tabCapture"
   ],
+  "commands": {
+    "stop-recording": {
+      "suggested_key": { "default": "Alt+Shift+S" },
+      "description": "Stop recording"
+    },
+    "toggle-pause": {
+      "suggested_key": { "default": "Alt+Shift+P" },
+      "description": "Pause or resume recording"
+    },
+    "add-marker": {
+      "suggested_key": { "default": "Alt+Shift+M" },
+      "description": "Mark a highlight"
+    }
+  },
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
   }

@@ -1,438 +1,476 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { useMediaRecorder, type RecordingFormat } from './useMediaRecorder';
-import { useStreamMerger } from './useStreamMerger';
-import { downloadBlob, downloadBlobFallback } from '../utils/download';
-import { convertToGif, convertToWebm, type ConversionProgress, type VideoResolution } from '../utils/convert';
-import { formatDuration, formatFileSize } from '../utils/format';
-import { PauseIcon, PlayIcon, StopIcon, RefreshIcon } from '../components/Icons';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { PauseIcon, PlayIcon, StopIcon, MarkerIcon } from '../components/Icons';
+import { LevelMeter } from '../components/ui';
 import { FEATURES } from '../config/features';
-import type { RecordingMode } from '../types';
+import { formatDuration } from '../utils/format';
+import { DEFAULT_RECORDING, deepMerge, effectsForRecording } from '../shared/settings';
+import { loadState } from '../shared/storage';
+import type {
+  ControlCommand,
+  DeepPartial,
+  EffectsSettings,
+  ExtensionMessage,
+  RecordingOptions,
+  RecordingState,
+} from '../shared/types';
+import { RecordingSession } from './session';
+import type { TrackingStatus } from './eventLog';
+import { finalizeRecording } from '../media/finalize';
+import { analyzeRecording, type AnalysisResult } from '../analysis/analyze';
+import { buildChapters } from '../analysis/scenes';
+import { detectHighlights } from '../analysis/highlights';
+import type { Project } from '../editor/project';
+import { Editor } from '../editor/Editor';
 
-type PageState = 'setup' | 'recording' | 'preview';
+type Phase = 'acquiring' | 'waiting' | 'countdown' | 'recording' | 'processing' | 'editing' | 'error';
+
+export interface EditorData {
+  project: Project;
+  mainBlob: Blob;
+  webcamBlob: Blob | null;
+  analysis: AnalysisResult;
+  recordedAt: Date;
+  /** The saved look before per-recording (tutorial) overrides */
+  baseEffects: EffectsSettings;
+  recording: RecordingOptions;
+}
+
+const CHAPTER_MIN_GAP_MS = 8000;
+
+function friendlyError(err: unknown): string {
+  const e = err as Error;
+  switch (e?.name) {
+    case 'NotAllowedError':
+      return 'Permission denied or sharing was cancelled.';
+    case 'NotFoundError':
+      return 'No camera or microphone found.';
+    case 'NotReadableError':
+      return 'The camera or microphone is in use by another app.';
+    default:
+      return e?.message || 'Something went wrong.';
+  }
+}
+
+function sendStatus(state: RecordingState, elapsed: number) {
+  const message: ExtensionMessage = { type: 'STATUS', status: { state, elapsed, updatedAt: Date.now() } };
+  chrome.runtime.sendMessage(message).catch(() => {});
+}
 
 export function RecorderPage() {
-  const [pageState, setPageState] = useState<PageState>('setup');
-  const [error, setError] = useState<string | null>(null);
-  const [mode, setMode] = useState<RecordingMode>('screen');
-  const [includeAudio, setIncludeAudio] = useState(true);
-  const [includeMic, setIncludeMic] = useState(false);
-  const [liveStream, setLiveStream] = useState<MediaStream | null>(null);
-  const [recordedBlobUrl, setRecordedBlobUrl] = useState<string | null>(null);
-  const [isConverting, setIsConverting] = useState(false);
-  const [conversionProgress, setConversionProgress] = useState<ConversionProgress | null>(null);
-  const [convertingFormat, setConvertingFormat] = useState<'webm' | 'gif' | null>(null);
-  const [videoResolution, setVideoResolution] = useState<VideoResolution>('original');
+  const params = useMemo(() => new URLSearchParams(window.location.search), []);
+  const options: RecordingOptions = useMemo(() => {
+    let parsed: DeepPartial<RecordingOptions> = {};
+    try {
+      parsed = JSON.parse(params.get('o') ?? '{}');
+    } catch {
+      // Fall back to defaults
+    }
+    return deepMerge(DEFAULT_RECORDING, parsed);
+  }, [params]);
 
-  const previewVideoRef = useRef<HTMLVideoElement>(null);
+  const sessionRef = useRef<RecordingSession | null>(null);
   const liveVideoRef = useRef<HTMLVideoElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
+  const webcamVideoRef = useRef<HTMLVideoElement>(null);
 
-  const { canvasRef, mergeStreams, stopMerging } = useStreamMerger();
+  const [phase, setPhase] = useState<Phase>('acquiring');
+  const phaseRef = useRef<Phase>('acquiring');
+  const [error, setError] = useState<string | null>(null);
+  const [warnings, setWarnings] = useState<string[]>([]);
+  const [paused, setPaused] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
+  const [countdown, setCountdown] = useState(0);
+  const [waitUntil, setWaitUntil] = useState<number | null>(null);
+  const [now, setNow] = useState(Date.now());
+  const [levels, setLevels] = useState<{ system: number | null; mic: number | null }>({ system: null, mic: null });
+  const [tracking, setTracking] = useState<TrackingStatus | null>(null);
+  const [trackingNote, setTrackingNote] = useState<string | null>(null);
+  const [processing, setProcessing] = useState({ label: '', progress: 0 });
+  const [editorData, setEditorData] = useState<EditorData | null>(null);
 
-  const [recordingFormat, setRecordingFormat] = useState<RecordingFormat>('webm');
+  const go = (p: Phase) => {
+    phaseRef.current = p;
+    setPhase(p);
+  };
 
-  const {
-    state: recorderState,
-    duration,
-    blob,
-    format,
-    startRecording,
-    stopRecording,
-    pauseRecording,
-    resumeRecording,
-  } = useMediaRecorder({
-    onStop: (recordedBlob, recordedFormat) => {
-      const url = URL.createObjectURL(recordedBlob);
-      setRecordedBlobUrl(url);
-      setRecordingFormat(recordedFormat);
-      setPageState('preview');
-    },
-    onError: (err) => {
-      setError(err.message);
-    },
-  });
-
-  // Parse URL params on mount
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const modeParam = params.get('mode') as RecordingMode;
-    const audioParam = params.get('audio');
-    const micParam = params.get('mic');
-
-    if (modeParam) setMode(modeParam);
-    if (audioParam) setIncludeAudio(audioParam === 'true');
-    if (micParam) setIncludeMic(micParam === 'true');
-
-    // Auto-start recording
-    handleStartCapture(modeParam || 'screen', audioParam === 'true', micParam === 'true');
+  const startRecording = useCallback(() => {
+    const session = sessionRef.current;
+    if (!session || phaseRef.current === 'recording') return;
+    session.start();
+    go('recording');
+    sendStatus('recording', 0);
+    chrome.runtime.sendMessage({ type: 'RECORDING_STARTED', minimize: session.surface === 'monitor' }).catch(() => {});
   }, []);
 
-  // Set live preview when stream is available and recording
+  const beginCountdown = useCallback(() => {
+    if (options.countdown <= 0) {
+      startRecording();
+      return;
+    }
+    go('countdown');
+    setCountdown(options.countdown);
+  }, [options.countdown, startRecording]);
+
+  const stop = useCallback(async () => {
+    const session = sessionRef.current;
+    const current = phaseRef.current;
+    if (!session) return;
+    if (current === 'waiting' || current === 'countdown' || current === 'acquiring') {
+      session.release();
+      sendStatus('idle', 0);
+      window.close();
+      return;
+    }
+    if (current !== 'recording') return;
+
+    go('processing');
+    sendStatus('editing', session.clock.elapsed());
+    chrome.runtime.sendMessage({ type: 'RECORDING_STOPPED' }).catch(() => {});
+
+    try {
+      setProcessing({ label: 'Finalizing recording…', progress: 0.02 });
+      const out = await session.stop();
+      const main = await finalizeRecording(out.main);
+      const webcam = out.webcam ? await finalizeRecording(out.webcam) : null;
+
+      setProcessing({ label: 'Analyzing scenes, audio and activity…', progress: 0.1 });
+      const analysis = await analyzeRecording(main.blob, main.durationMs, (p) =>
+        setProcessing({ label: 'Analyzing scenes, audio and activity…', progress: 0.1 + 0.9 * p })
+      );
+
+      const stored = await loadState();
+      const duration = main.durationMs;
+      const events = out.events.filter((e) => e.t <= duration);
+      const project: Project = {
+        duration,
+        mode: options.source,
+        surface: out.surface,
+        sourceWidth: main.width || out.width,
+        sourceHeight: main.height || out.height,
+        webcamOffsetMs: webcam ? out.webcamOffsetMs ?? 0 : null,
+        cameraOnly: options.source === 'camera',
+        title: out.title,
+        events,
+        activity: analysis.activity,
+        cuts: [],
+        manualZooms: [],
+        suppressedZoomIds: [],
+        chapters: buildChapters(analysis.sceneCuts, events, duration, CHAPTER_MIN_GAP_MS),
+        highlights: detectHighlights(events, analysis.activity, duration, { windowMs: 6000, count: 3 }),
+        settings: effectsForRecording(stored.effects, options),
+      };
+      setEditorData({
+        project,
+        mainBlob: main.blob,
+        webcamBlob: webcam?.blob ?? null,
+        analysis,
+        recordedAt: new Date(),
+        baseEffects: stored.effects,
+        recording: options,
+      });
+      go('editing');
+    } catch (err) {
+      setError(`Could not process the recording: ${friendlyError(err)}`);
+      go('error');
+    }
+  }, [options]);
+
+  const stopRef = useRef(stop);
+  stopRef.current = stop;
+
+  const control = useCallback((command: ControlCommand) => {
+    const session = sessionRef.current;
+    if (!session) return;
+    const isPaused = session.clock.isPaused();
+    if (command === 'stop') {
+      stopRef.current();
+    } else if (command === 'marker') {
+      session.addMarker();
+    } else if (phaseRef.current === 'recording') {
+      const wantPause = command === 'pause' || (command === 'toggle-pause' && !isPaused);
+      const wantResume = command === 'resume' || (command === 'toggle-pause' && isPaused);
+      if (wantPause && !isPaused) {
+        session.pause();
+        setPaused(true);
+        sendStatus('paused', session.clock.elapsed());
+      } else if (wantResume && isPaused) {
+        session.resume();
+        setPaused(false);
+        sendStatus('recording', session.clock.elapsed());
+      }
+    }
+  }, []);
+
+  // Acquire capture on open
   useEffect(() => {
-    if (pageState === 'recording' && liveStream && liveVideoRef.current) {
-      liveVideoRef.current.srcObject = liveStream;
+    const session = new RecordingSession(options, params.get('sid') || null);
+    sessionRef.current = session;
+    const onConnect = (port: chrome.runtime.Port) => session.attachTracker(port);
+    chrome.runtime.onConnect.addListener(onConnect);
+    session.onSourceEnded = () => stopRef.current();
+    session.onTrackingChange = setTracking;
+
+    (async () => {
+      try {
+        await session.acquire();
+      } catch (err) {
+        setError(friendlyError(err));
+        go('error');
+        sendStatus('idle', 0);
+        return;
+      }
+      setWarnings(session.warnings);
+      if (options.source !== 'camera' && FEATURES.PAGE_TRACKING) {
+        chrome.runtime
+          .sendMessage({ type: 'INJECT_TRACKER' })
+          .then((res?: { ok: boolean }) => {
+            if (!res?.ok) setTrackingNote('Page effects unavailable on this page — using smart auto-framing.');
+          })
+          .catch(() => {});
+      }
+      const startAt = options.schedule.startAt;
+      if (startAt && startAt > Date.now()) {
+        setWaitUntil(startAt);
+        go('waiting');
+      } else {
+        beginCountdown();
+      }
+    })();
+
+    return () => {
+      chrome.runtime.onConnect.removeListener(onConnect);
+    };
+    // Runs once per recorder window
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Commands from the popup and keyboard shortcuts
+  useEffect(() => {
+    const onMessage = (msg: ExtensionMessage) => {
+      if (msg.type === 'CONTROL') control(msg.command);
+    };
+    chrome.runtime.onMessage.addListener(onMessage);
+    return () => chrome.runtime.onMessage.removeListener(onMessage);
+  }, [control]);
+
+  // Live preview
+  useEffect(() => {
+    const session = sessionRef.current;
+    if (!session) return;
+    if (liveVideoRef.current && session.previewStream && liveVideoRef.current.srcObject !== session.previewStream) {
+      liveVideoRef.current.srcObject = session.previewStream;
       liveVideoRef.current.play().catch(() => {});
     }
-  }, [pageState, liveStream]);
+    if (webcamVideoRef.current && session.webcamStream && webcamVideoRef.current.srcObject !== session.webcamStream) {
+      webcamVideoRef.current.srcObject = session.webcamStream;
+      webcamVideoRef.current.play().catch(() => {});
+    }
+  }, [phase]);
 
-  // Set playback video when blob URL is available and in preview
+  // Scheduled start
   useEffect(() => {
-    if (pageState === 'preview' && recordedBlobUrl && previewVideoRef.current) {
-      previewVideoRef.current.src = recordedBlobUrl;
+    if (phase !== 'waiting' || !waitUntil) return;
+    const id = window.setInterval(() => {
+      setNow(Date.now());
+      if (Date.now() >= waitUntil) beginCountdown();
+    }, 250);
+    return () => window.clearInterval(id);
+  }, [phase, waitUntil, beginCountdown]);
+
+  // Countdown
+  useEffect(() => {
+    if (phase !== 'countdown') return;
+    if (countdown <= 0) {
+      startRecording();
+      return;
     }
-  }, [pageState, recordedBlobUrl]);
+    const id = window.setTimeout(() => setCountdown((c) => c - 1), 1000);
+    return () => window.clearTimeout(id);
+  }, [phase, countdown, startRecording]);
 
-  const handleStartCapture = async (
-    captureMode: RecordingMode,
-    audio: boolean = includeAudio,
-    mic: boolean = includeMic
-  ) => {
-    try {
-      setError(null);
-      let finalStream: MediaStream;
+  // Timer, level meters, auto-stop
+  useEffect(() => {
+    if (phase !== 'recording' && phase !== 'waiting' && phase !== 'countdown') return;
+    const limitMs = options.schedule.stopAfterMin ? options.schedule.stopAfterMin * 60_000 : null;
+    const id = window.setInterval(() => {
+      const session = sessionRef.current;
+      if (!session) return;
+      const e = session.clock.elapsed();
+      setElapsed(e);
+      setLevels({ system: session.mixer.level('system'), mic: session.mixer.level('mic') });
+      if (phaseRef.current === 'recording' && limitMs !== null && e >= limitMs) stopRef.current();
+    }, 100);
+    return () => window.clearInterval(id);
+  }, [phase, options.schedule.stopAfterMin]);
 
-      if (captureMode === 'screen' || captureMode === 'screen-camera') {
-        // Get screen stream
-        const screenStream = await navigator.mediaDevices.getDisplayMedia({
-          video: {
-            displaySurface: 'monitor',
-          },
-          audio: audio && FEATURES.SYSTEM_AUDIO,
-        });
+  // Protect unsaved work
+  useEffect(() => {
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (['recording', 'processing', 'editing'].includes(phaseRef.current)) e.preventDefault();
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, []);
 
-        if (captureMode === 'screen-camera') {
-          // Also get camera stream
-          const cameraStream = await navigator.mediaDevices.getUserMedia({
-            video: { width: 300, height: 300, facingMode: 'user' },
-            audio: mic,
-          });
+  if (phase === 'editing' && editorData) {
+    return <Editor data={editorData} />;
+  }
 
-          // Merge streams using canvas
-          finalStream = mergeStreams(screenStream, cameraStream);
-        } else {
-          // Add microphone if requested
-          if (mic) {
-            const micStream = await navigator.mediaDevices.getUserMedia({
-              audio: true,
-            });
-            micStream.getAudioTracks().forEach((track) => screenStream.addTrack(track));
-          }
-          finalStream = screenStream;
-        }
-
-        // Handle screen share stop
-        screenStream.getVideoTracks()[0].onended = () => {
-          stopRecording();
-        };
-      } else {
-        // Camera only mode
-        finalStream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'user', width: 1280, height: 720 },
-          audio: mic || audio,
-        });
-      }
-
-      streamRef.current = finalStream;
-
-      // Store stream for useEffect to set on video element
-      setLiveStream(finalStream);
-      setPageState('recording');
-      startRecording(finalStream);
-    } catch (err) {
-      const error = err as Error;
-      if (error.name === 'NotAllowedError') {
-        setError('Permission denied. Please allow screen/camera access.');
-      } else if (error.name === 'NotFoundError') {
-        setError('No camera or microphone found.');
-      } else {
-        setError(error.message);
-      }
-    }
-  };
-
-  const handleStopRecording = useCallback(() => {
-    stopRecording();
-    stopMerging();
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop());
-      streamRef.current = null;
-    }
-  }, [stopRecording, stopMerging]);
-
-  const handleDownload = async (downloadFormat: 'webm' | 'mp4' | 'gif') => {
-    if (!blob) return;
-
-    setError(null);
-
-    try {
-      if (downloadFormat === 'webm') {
-        // WebM download - convert if resolution changed or native format is not WebM
-        if (videoResolution === 'original' && recordingFormat === 'webm') {
-          // Direct download
-          try {
-            await downloadBlob(blob, undefined, 'webm');
-          } catch {
-            downloadBlobFallback(blob, undefined, 'webm');
-          }
-        } else {
-          // Convert to WebM with resolution
-          setIsConverting(true);
-          setConversionProgress(null);
-          setConvertingFormat('webm');
-
-          const webmBlob = await convertToWebm(blob, setConversionProgress, videoResolution);
-
-          try {
-            await downloadBlob(webmBlob, undefined, 'webm');
-          } catch {
-            downloadBlobFallback(webmBlob, undefined, 'webm');
-          }
-        }
-      } else if (downloadFormat === 'mp4') {
-        // MP4 only available if native format is MP4
-        if (recordingFormat === 'mp4') {
-          try {
-            await downloadBlob(blob, undefined, 'mp4');
-          } catch {
-            downloadBlobFallback(blob, undefined, 'mp4');
-          }
-        }
-      } else if (downloadFormat === 'gif') {
-        // Convert to GIF
-        setIsConverting(true);
-        setConversionProgress(null);
-        setConvertingFormat('gif');
-
-        const gifBlob = await convertToGif(blob, setConversionProgress, videoResolution);
-
-        try {
-          await downloadBlob(gifBlob, undefined, 'gif');
-        } catch {
-          downloadBlobFallback(gifBlob, undefined, 'gif');
-        }
-      }
-    } catch (err) {
-      setError('Conversion failed: ' + (err as Error).message);
-    } finally {
-      setIsConverting(false);
-      setConversionProgress(null);
-      setConvertingFormat(null);
-    }
-  };
-
-  const handleNewRecording = () => {
-    // Clean up previous blob URL
-    if (recordedBlobUrl) {
-      URL.revokeObjectURL(recordedBlobUrl);
-    }
-    setRecordedBlobUrl(null);
-    setLiveStream(null);
-    setPageState('setup');
-    setError(null);
-    // Start new recording immediately
-    handleStartCapture(mode);
-  };
+  const limitMs = options.schedule.stopAfterMin ? options.schedule.stopAfterMin * 60_000 : null;
+  const modeLabel = { screen: 'Screen', tab: 'Tab', camera: 'Camera' }[options.source];
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white">
-      {/* Hidden canvas for stream merging */}
-      <canvas ref={canvasRef} className="hidden" />
-
-      {/* Error display */}
+    <div className="flex h-screen flex-col bg-gray-900 text-white">
       {error && (
-        <div className="fixed top-2 left-2 right-2 bg-red-600 text-white px-4 py-2 rounded-lg shadow-lg z-50 text-sm">
+        <div className="m-3 rounded-lg bg-red-600 px-4 py-3 text-sm">
           <p>{error}</p>
-          <button
-            onClick={() => setError(null)}
-            className="absolute top-1 right-2 text-white/80 hover:text-white"
-          >
-            x
-          </button>
-        </div>
-      )}
-
-      {/* Conversion progress overlay */}
-      {isConverting && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
-          <div className="bg-gray-800 rounded-lg p-6 text-center max-w-xs">
-            <div className="w-12 h-12 border-4 border-primary-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-            <p className="text-white font-medium mb-2">
-              {conversionProgress?.phase === 'extracting' && `Extracting frames... ${conversionProgress.progress}%`}
-              {conversionProgress?.phase === 'encoding' && `Encoding ${convertingFormat?.toUpperCase()}... ${conversionProgress.progress}%`}
-              {!conversionProgress && `Converting to ${convertingFormat?.toUpperCase()}...`}
-            </p>
-            {conversionProgress && conversionProgress.phase !== 'done' && (
-              <div className="w-full bg-gray-700 rounded-full h-2">
-                <div
-                  className="bg-primary-500 h-2 rounded-full transition-all"
-                  style={{ width: `${conversionProgress.progress}%` }}
-                />
-              </div>
-            )}
+          <div className="mt-2 flex gap-3">
+            <button className="underline" onClick={() => window.location.reload()}>
+              Try again
+            </button>
+            <button className="underline" onClick={() => window.close()}>
+              Close
+            </button>
           </div>
         </div>
       )}
 
-      {/* Recording view */}
-      {pageState === 'recording' && (
-        <div className="flex flex-col h-screen">
-          {/* Live preview */}
-          <div className="flex-1 relative bg-black min-h-0">
-            <video
-              ref={liveVideoRef}
-              className="w-full h-full object-contain"
-              muted
-              playsInline
-            />
+      {phase === 'acquiring' && (
+        <div className="flex flex-1 items-center justify-center">
+          <div className="text-center">
+            <div className="mx-auto mb-3 h-12 w-12 animate-spin rounded-full border-4 border-primary-500 border-t-transparent" />
+            <p className="text-sm text-gray-400">
+              {options.source === 'screen' ? 'Choose what to share…' : 'Requesting permissions…'}
+            </p>
+          </div>
+        </div>
+      )}
 
-            {/* Recording indicator */}
-            <div className="absolute top-2 left-2 flex items-center gap-2 bg-black/60 px-3 py-1.5 rounded-full">
+      {phase === 'processing' && (
+        <div className="flex flex-1 items-center justify-center">
+          <div className="w-72 text-center">
+            <p className="mb-3 text-sm text-gray-300">{processing.label}</p>
+            <div className="h-2 w-full overflow-hidden rounded-full bg-gray-700">
               <div
-                className={`w-2.5 h-2.5 rounded-full ${
-                  recorderState === 'recording' ? 'bg-red-500 recording-pulse' : 'bg-yellow-500'
+                className="h-full bg-primary-500 transition-[width]"
+                style={{ width: `${Math.round(processing.progress * 100)}%` }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {(phase === 'waiting' || phase === 'countdown' || phase === 'recording') && (
+        <>
+          <div className="relative min-h-0 flex-1 bg-black">
+            <video ref={liveVideoRef} className="h-full w-full object-contain" muted playsInline />
+            {options.webcam && (
+              <video
+                ref={webcamVideoRef}
+                className="absolute bottom-3 right-3 h-28 w-28 rounded-full border-2 border-white/70 object-cover shadow-xl"
+                style={{ transform: 'scaleX(-1)' }}
+                muted
+                playsInline
+              />
+            )}
+
+            <div className="absolute left-2 top-2 flex items-center gap-2 rounded-full bg-black/60 px-3 py-1.5">
+              <div
+                className={`h-2.5 w-2.5 rounded-full ${
+                  phase !== 'recording' ? 'bg-gray-400' : paused ? 'bg-yellow-500' : 'bg-red-500 recording-pulse'
                 }`}
               />
-              <span className="font-mono text-sm">{formatDuration(duration)}</span>
-              {recorderState === 'paused' && (
-                <span className="text-yellow-400 text-xs">PAUSED</span>
+              <span className="font-mono text-sm">{formatDuration(elapsed)}</span>
+              {paused && <span className="text-xs text-yellow-400">PAUSED</span>}
+              {limitMs !== null && phase === 'recording' && (
+                <span className="text-xs text-gray-400">· stops in {formatDuration(Math.max(0, limitMs - elapsed))}</span>
               )}
             </div>
+            <div className="absolute right-2 top-2 rounded-full bg-black/60 px-2 py-1 text-xs">{modeLabel}</div>
 
-            {/* Mode indicator */}
-            <div className="absolute top-2 right-2 bg-black/60 px-2 py-1 rounded-full text-xs">
-              {mode === 'screen' && 'Screen'}
-              {mode === 'camera' && 'Camera'}
-              {mode === 'screen-camera' && 'Screen+Cam'}
-            </div>
-          </div>
-
-          {/* Controls */}
-          <div className="p-4 bg-gray-800 flex items-center justify-center gap-3">
-            {recorderState === 'recording' ? (
-              <button
-                onClick={pauseRecording}
-                className="w-12 h-12 rounded-full bg-yellow-600 hover:bg-yellow-500 flex items-center justify-center transition-colors"
-                title="Pause"
-              >
-                <PauseIcon />
-              </button>
-            ) : (
-              <button
-                onClick={resumeRecording}
-                className="w-12 h-12 rounded-full bg-green-600 hover:bg-green-500 flex items-center justify-center transition-colors"
-                title="Resume"
-              >
-                <PlayIcon />
-              </button>
+            {phase === 'countdown' && (
+              <div className="absolute inset-0 flex items-center justify-center bg-black/50">
+                <span key={countdown} className="text-8xl font-bold text-white drop-shadow-lg">
+                  {countdown}
+                </span>
+              </div>
             )}
 
-            <button
-              onClick={handleStopRecording}
-              className="w-14 h-14 rounded-full bg-red-600 hover:bg-red-500 flex items-center justify-center transition-colors"
-              title="Stop Recording"
-            >
-              <StopIcon />
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Preview view */}
-      {pageState === 'preview' && blob && (
-        <div className="flex flex-col h-screen">
-          {/* Video preview */}
-          <div className="flex-1 relative bg-black min-h-0">
-            <video
-              ref={previewVideoRef}
-              className="w-full h-full object-contain"
-              controls
-              playsInline
-            />
+            {phase === 'waiting' && waitUntil && (
+              <div className="absolute inset-0 flex items-center justify-center bg-black/70">
+                <div className="text-center">
+                  <p className="text-sm text-gray-300">
+                    Recording starts at{' '}
+                    {new Date(waitUntil).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </p>
+                  <p className="my-2 font-mono text-5xl">{formatDuration(Math.max(0, waitUntil - now))}</p>
+                  <div className="flex justify-center gap-3">
+                    <button className="btn-primary text-sm" onClick={beginCountdown}>
+                      Start now
+                    </button>
+                    <button className="btn-secondary text-sm" onClick={() => stopRef.current()}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
-          {/* Info and actions */}
-          <div className="p-4 bg-gray-800">
-            <div className="mb-3">
-              <h2 className="text-sm font-medium">Recording Complete</h2>
-              <p className="text-gray-400 text-xs">
-                {formatDuration(duration)} - {formatFileSize(blob.size)}
-              </p>
+          <div className="space-y-2 bg-gray-800 px-4 py-3">
+            <div className="flex items-center gap-3 text-xs">
+              {tracking?.connected && tracking.aligned ? (
+                <span className="rounded-full bg-green-600/20 px-2 py-0.5 text-green-300">
+                  Tracking clicks &amp; keys{tracking.title ? ` · ${tracking.title}` : ''}
+                </span>
+              ) : options.source !== 'camera' ? (
+                <span className="rounded-full bg-gray-700 px-2 py-0.5 text-gray-300">
+                  {trackingNote ?? 'Effects: smart auto-framing from on-screen motion'}
+                </span>
+              ) : null}
+              {warnings.map((w) => (
+                <span key={w} className="text-yellow-400">
+                  {w}
+                </span>
+              ))}
             </div>
-
-            {/* Video Resolution selector */}
-            <div className="mb-3">
-              <label className="block text-xs text-gray-400 mb-1">Video Resolution</label>
-              <select
-                value={videoResolution}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  setVideoResolution(val === 'original' ? 'original' : parseInt(val, 10) as VideoResolution);
-                }}
-                disabled={isConverting}
-                className="w-full bg-gray-700 text-white text-sm rounded-lg px-3 py-2 border border-gray-600 focus:outline-none focus:border-primary-500 disabled:opacity-50"
-              >
-                <option value="original">Original</option>
-                <option value={1080}>1080p</option>
-                <option value={720}>720p</option>
-                <option value={480}>480p</option>
-              </select>
-              <p className="text-xs text-gray-500 mt-1">Resolution applies to WebM and GIF only</p>
-            </div>
-
-            {/* Download format buttons */}
-            <div className="mb-3">
-              <label className="block text-xs text-gray-400 mb-1">Download Format</label>
-              <div className="grid grid-cols-3 gap-2">
+            <div className="flex items-center gap-4">
+              <div className="w-56 space-y-1">
+                <LevelMeter label={options.source === 'tab' ? 'Tab' : 'System'} level={levels.system} />
+                <LevelMeter label="Mic" level={levels.mic} />
+              </div>
+              <div className="ml-auto flex items-center gap-3">
+                {phase === 'recording' && (
+                  <>
+                    <button
+                      onClick={() => control('marker')}
+                      className="flex h-10 w-10 items-center justify-center rounded-full bg-gray-700 hover:bg-gray-600"
+                      title="Mark a highlight (Alt+Shift+M)"
+                    >
+                      <MarkerIcon />
+                    </button>
+                    <button
+                      onClick={() => control(paused ? 'resume' : 'pause')}
+                      className={`flex h-12 w-12 items-center justify-center rounded-full ${
+                        paused ? 'bg-green-600 hover:bg-green-500' : 'bg-yellow-600 hover:bg-yellow-500'
+                      }`}
+                      title={paused ? 'Resume (Alt+Shift+P)' : 'Pause (Alt+Shift+P)'}
+                    >
+                      {paused ? <PlayIcon /> : <PauseIcon />}
+                    </button>
+                  </>
+                )}
                 <button
-                  onClick={() => handleDownload('webm')}
-                  disabled={isConverting}
-                  className="btn-primary text-sm py-2 rounded-lg font-medium transition-colors"
+                  onClick={() => stopRef.current()}
+                  className="flex h-14 w-14 items-center justify-center rounded-full bg-red-600 hover:bg-red-500"
+                  title={phase === 'recording' ? 'Stop (Alt+Shift+S)' : 'Cancel'}
                 >
-                  WebM
-                </button>
-                <button
-                  onClick={() => handleDownload('mp4')}
-                  disabled={isConverting || recordingFormat !== 'mp4'}
-                  className={`text-sm py-2 rounded-lg font-medium transition-colors ${
-                    recordingFormat === 'mp4'
-                      ? 'btn-primary'
-                      : 'bg-gray-700 text-gray-500 cursor-not-allowed'
-                  }`}
-                >
-                  MP4
-                </button>
-                <button
-                  onClick={() => handleDownload('gif')}
-                  disabled={isConverting}
-                  className="btn-primary text-sm py-2 rounded-lg font-medium transition-colors"
-                >
-                  GIF
+                  <StopIcon />
                 </button>
               </div>
             </div>
-
-            <button
-              onClick={handleNewRecording}
-              disabled={isConverting}
-              className="w-full btn-secondary flex items-center justify-center gap-2 text-sm py-2 disabled:opacity-50"
-            >
-              <RefreshIcon />
-              New Recording
-            </button>
           </div>
-        </div>
-      )}
-
-      {/* Setup/Loading view */}
-      {pageState === 'setup' && !error && (
-        <div className="flex items-center justify-center h-screen">
-          <div className="text-center">
-            <div className="w-12 h-12 border-4 border-primary-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-            <p className="text-gray-400 text-sm">Requesting permissions...</p>
-          </div>
-        </div>
+        </>
       )}
     </div>
   );
 }
-

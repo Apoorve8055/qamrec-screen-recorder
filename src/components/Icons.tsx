@@ -73,3 +73,55 @@ export function GlobeIcon({ className = 'w-4 h-4' }: { className?: string }) {
     </svg>
   );
 }
+
+export function TabIcon({ className = 'w-5 h-5' }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7a2 2 0 012-2h5l2 3h7a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
+    </svg>
+  );
+}
+
+export function MarkerIcon({ className = 'w-4 h-4' }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 21V4m0 0h11l-2 4 2 4H5" />
+    </svg>
+  );
+}
+
+export function ScissorsIcon({ className = 'w-4 h-4' }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <circle cx="6" cy="6" r="3" strokeWidth={2} />
+      <circle cx="6" cy="18" r="3" strokeWidth={2} />
+      <path strokeLinecap="round" strokeWidth={2} d="M20 4L8.1 15.9M14.5 14.5L20 20M8.1 8.1L12 12" />
+    </svg>
+  );
+}
+
+export function ZoomIcon({ className = 'w-4 h-4' }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <circle cx="11" cy="11" r="7" strokeWidth={2} />
+      <path strokeLinecap="round" strokeWidth={2} d="M21 21l-4.35-4.35M11 8v6M8 11h6" />
+    </svg>
+  );
+}
+
+export function DownloadIcon({ className = 'w-4 h-4' }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v12m0 0l-5-5m5 5l5-5M4 20h16" />
+    </svg>
+  );
+}
+
+export function ClockIcon({ className = 'w-4 h-4' }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <circle cx="12" cy="12" r="9" strokeWidth={2} />
+      <path strokeLinecap="round" strokeWidth={2} d="M12 7v5l3 2" />
+    </svg>
+  );
+}
