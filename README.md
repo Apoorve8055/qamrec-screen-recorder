@@ -1,6 +1,6 @@
-# <img src="public/icons/icon48.png" width="32" height="32" alt="Qamrec"> Qamrec Screen Recorder
+# <img src="public/icons/icon48.png" width="32" height="32" alt="Qamrec"> Qamrec - Private Screen Recorder & Subtitles
 
-A free, open-source, privacy-focused screen and camera recorder for Chrome that makes recordings look edited: automatic zoom on clicks, smooth camera moves, cursor and keystroke overlays, a styled webcam bubble, and a built-in editor. Everything is processed on your device.
+A free, open-source, privacy-focused screen and camera recorder for Chrome that makes recordings look edited: automatic zoom on clicks, smooth camera moves, cursor and keystroke overlays, a styled webcam bubble, on-device subtitles, and a built-in editor. Everything is processed on your device.
 
 ## Features
 
@@ -22,19 +22,30 @@ A free, open-source, privacy-focused screen and camera recorder for Chrome that 
 - **Cursor highlight**, **click ripples**, **numbered click indicators**, **scroll indicator**
 - **Keystroke & shortcut display** (typed text is never shown; password/payment fields are ignored)
 - **Custom zoom intensity, hold duration and transition speed**; **manual zoom keyframes** (add, move, resize, set focus by clicking the preview)
+- **Delete individual auto zooms** you don't want, and restore them all again later
 - **Webcam shape** (circle, rounded, square, wide), **position** (drag it), **size**, **crop**, **border**, **shadow**, **mirror** and **background blur** (MediaPipe, runs locally)
 - **Frame styling** - background gradients, padding, rounded corners, drop shadow
 - **Chapter markers** from page changes and scene cuts (with optional title cards) and **automatic highlight detection**
 
+### Subtitles
+- **Generate subtitles from the audio** on your device with OpenAI's open-source **Whisper** model (GPU via WebGPU when available, otherwise CPU/WASM); choose the language or detect it, and Fast / Balanced / Accurate model sizes
+- Word-level timing splits speech into readable cues at pauses and sentence ends; silent stretches and cut parts are skipped
+- **Edit and manage**: fix text, add at the playhead, delete, split, merge, set start/end to the playhead, drag or resize cues on the timeline, shift all cues to fix sync
+- **Style**: burned into the video (position, size, color, background box or outline, characters per line), plus an optional **embedded WebVTT track** that viewers can toggle (**WebM only** - the MP4 container cannot carry one)
+- **Import / export SRT and VTT** (exports follow your cuts and trims)
+
 ### Editing & export
 - **Trim & cut** on a timeline with waveform, **automatic silence removal**, "keep only highlights"
-- **MP4** (H.264/AAC via WebCodecs), **WebM** (VP9/Opus) and **GIF** export with conversion progress and cancel
+- **MP4** (H.264/AAC via WebCodecs, falling back to HEVC/VP9/AV1 if the machine can't encode H.264), **WebM** (VP9/Opus) and **GIF** export, with conversion progress and cancel; GIFs are capped at 720p / 15 fps and carry no audio
 - **Resolution scaling** (original, 2160p-480p; scales by height and never upscales) and frame-rate choice
 - **Custom filename templates**: `{date} {time} {datetime} {title} {mode} {duration} {res} {n}`
+- **Save the original recording** (WebM, no effects applied) alongside the edited export
+- **Save the current look as a preset** from the editor, to reuse on later recordings
+- Settings are grouped into **Zoom, Cursor, Camera, Frame, Edit, Subtitles and Export** panels
 
 ## Privacy
 
-All recording, analysis and encoding happens locally in your browser. Nothing is uploaded, there is no account, no analytics. The page tracker is injected only into the tab you start recording from, only sends events while recording, and never records typed characters.
+All recording, analysis, transcription and encoding happens locally in your browser. Nothing is uploaded, there is no account, no analytics. The only network request is the optional, one-time download of the open Whisper model weights from Hugging Face when you first generate subtitles (then cached); your audio never leaves your device. The page tracker is injected only into the tab you start recording from, only sends events while recording, and never records typed characters.
 
 ### Permissions
 | Permission | Why |
@@ -89,6 +100,7 @@ All recording, analysis and encoding happens locally in your browser. Nothing is
 - [mediabunny](https://mediabunny.dev) (WebCodecs decode/encode, MP4/WebM muxing)
 - MediaPipe Tasks Vision (webcam background blur, bundled locally)
 - gifenc (GIF encoding)
+- [Transformers.js](https://github.com/huggingface/transformers.js) (Apache-2.0) + ONNX Runtime Web (MIT, bundled locally) running [Whisper](https://github.com/openai/whisper) speech-to-text models (Apache-2.0 weights, `onnx-community/whisper-*_timestamped`) for subtitles
 
 ## Project Structure
 ```
@@ -104,6 +116,7 @@ src/
 ├── popup/          # Extension popup UI
 ├── recorder/       # Recording window, capture session, audio mixer
 ├── shared/         # Types, settings/presets, storage, filenames
+├── subtitles/      # Speech-to-text worker (Whisper), cue building, SRT/VTT
 ├── tracker/        # Page tracker content script
 └── utils/          # Utility functions
 ```

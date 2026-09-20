@@ -3,6 +3,7 @@ import type { Project } from '../editor/project';
 import type { Scene } from './scene';
 import { cameraAt, viewRect, type CameraState } from './camera';
 import { activeClicks, scrollActivityAt, typingFocusAt, visibleKeystrokes } from './cursor';
+import { subtitleAt, wrapText } from '../subtitles/subtitles';
 
 type Ctx = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
 
@@ -25,7 +26,7 @@ export interface FrameSources {
   webcamHeight: number;
 }
 
-const FONT = 'Inter, "Segoe UI", system-ui, -apple-system, sans-serif';
+const FONT = '"Inter Variable", Inter, "Segoe UI", system-ui, -apple-system, sans-serif';
 const RIPPLE_MS = 650;
 const STEP_BADGE_MS = 2000;
 const TYPING_GLOW_HOLD_MS = 900;
@@ -370,6 +371,49 @@ function drawChapterTitle(ctx: Ctx, height: number, scene: Scene, t: number, uni
   ctx.restore();
 }
 
+function drawSubtitles(ctx: Ctx, width: number, height: number, scene: Scene, t: number, unit: number) {
+  const { project } = scene;
+  const style = project.settings.subtitles;
+  if (!style.show || !project.subtitles.length) return;
+  const cue = subtitleAt(project.subtitles, t);
+  if (!cue || !cue.text.trim()) return;
+
+  const fontSize = style.fontSize * unit;
+  const lineH = fontSize * 1.3;
+  const padX = fontSize * 0.45;
+  ctx.save();
+  ctx.font = `600 ${fontSize}px ${FONT}`;
+  // About `maxChars` characters per line (half an em each), never wider than 80% of the frame
+  const maxWidth = Math.min(width * 0.8, style.maxChars * fontSize * 0.5);
+  const lines = wrapText(cue.text, maxWidth, (s) => ctx.measureText(s).width);
+  // Make room for keystroke pills when they share the same edge
+  const { keys } = project.settings;
+  const sharesEdge = keys.enabled && keys.position === style.position && scene.keys.length > 0;
+  const margin = (sharesEdge ? 140 : 56) * unit;
+  const top = style.position === 'bottom' ? height - margin - lines.length * lineH : margin;
+
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.lineJoin = 'round';
+  lines.forEach((line, i) => {
+    const cy = top + i * lineH + lineH / 2;
+    if (style.background) {
+      const w = ctx.measureText(line).width;
+      ctx.beginPath();
+      ctx.roundRect(width / 2 - w / 2 - padX, cy - lineH / 2, w + padX * 2, lineH, 8 * unit);
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.72)';
+      ctx.fill();
+    } else {
+      ctx.lineWidth = Math.max(2, fontSize * 0.14);
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.9)';
+      ctx.strokeText(line, width / 2, cy);
+    }
+    ctx.fillStyle = style.textColor;
+    ctx.fillText(line, width / 2, cy + unit);
+  });
+  ctx.restore();
+}
+
 /** Renders one output frame at source time `t` */
 export function renderFrame(
   ctx: Ctx,
@@ -395,5 +439,6 @@ export function renderFrame(
   drawWebcam(ctx, width, height, sources, project, unit);
   drawKeystrokes(ctx, width, height, scene, t, unit);
   drawChapterTitle(ctx, height, scene, t, unit);
+  drawSubtitles(ctx, width, height, scene, t, unit);
   ctx.restore();
 }

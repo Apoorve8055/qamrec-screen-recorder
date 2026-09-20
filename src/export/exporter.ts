@@ -10,6 +10,7 @@ import {
   Mp4OutputFormat,
   Output,
   QUALITY_HIGH,
+  TextSubtitleSource,
   VideoSampleSink,
   WebMOutputFormat,
   getFirstEncodableAudioCodec,
@@ -23,6 +24,7 @@ import { renderFrame, type FrameSources } from '../effects/compositor';
 import { getBackgroundBlur, type BackgroundBlur } from '../effects/webcamBlur';
 import { keptSegments, outputDuration, outputToSource, sourceToOutput } from '../editor/timeline';
 import { outputSize } from '../shared/resolution';
+import { outputCues, toVtt } from '../subtitles/subtitles';
 
 export interface ExportOptions {
   scene: Scene;
@@ -163,7 +165,25 @@ async function exportVideo(opts: ExportOptions): Promise<Blob> {
     }
   }
 
+  // Optional soft subtitles: a toggleable WebVTT track, alongside any burned-in captions
+  const subs = project.settings.subtitles;
+  const vtt =
+    subs.embedTrack && outputCues(project.subtitles, project.duration, project.cuts).length
+      ? toVtt(project.subtitles, project.duration, project.cuts, subs.maxChars)
+      : null;
+  let subtitleSource: TextSubtitleSource | null = null;
+  if (vtt && output.format.getSupportedSubtitleCodecs().includes('webvtt')) {
+    subtitleSource = new TextSubtitleSource('webvtt');
+    output.addSubtitleTrack(subtitleSource, { name: 'Subtitles', disposition: { default: false } });
+  }
+
   await output.start();
+
+  const subtitleLoop = async () => {
+    if (!subtitleSource || !vtt) return;
+    await subtitleSource.add(vtt);
+    subtitleSource.close();
+  };
 
   const videoLoop = async () => {
     for await (const frame of renderFrames(opts, canvas, fps)) {
@@ -207,7 +227,7 @@ async function exportVideo(opts: ExportOptions): Promise<Blob> {
   };
 
   try {
-    await Promise.all([videoLoop(), audioLoop()]);
+    await Promise.all([videoLoop(), audioLoop(), subtitleLoop()]);
     await output.finalize();
   } catch (err) {
     await output.cancel().catch(() => {});

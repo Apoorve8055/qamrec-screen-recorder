@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, type ComponentType } from 'react';
+import { Camera, Captions, Frame, MousePointer2, Scissors, Upload, ZoomIn, type LucideProps } from 'lucide-react';
 import type { DeepPartial, EffectsSettings, ExportFormat, ExportResolution, WebcamShape, ZoomRegion } from '../shared/types';
 import type { Project } from './project';
 import { ColorInput, Section, Segmented, Slider, Toggle } from '../components/ui';
@@ -7,9 +8,10 @@ import { FEATURES } from '../config/features';
 import { FILENAME_TOKENS } from '../shared/filename';
 import { formatDuration } from '../utils/format';
 import type { SilenceOptions } from '../analysis/silence';
+import { SubtitlesPanel, type SubtitleActions } from './SubtitlesPanel';
 
 export type BlurState = 'off' | 'loading' | 'ready' | 'unavailable';
-type Tab = 'zoom' | 'cursor' | 'camera' | 'frame' | 'edit' | 'export';
+type Tab = 'zoom' | 'cursor' | 'camera' | 'frame' | 'edit' | 'subtitles' | 'export';
 
 interface Props {
   project: Project;
@@ -37,6 +39,7 @@ interface Props {
   onExport: () => void;
   onSaveOriginal: () => void;
   onSavePreset: (name: string) => void;
+  subtitles: SubtitleActions;
 }
 
 const sec = (ms: number) => `${(ms / 1000).toFixed(1)}s`;
@@ -47,13 +50,14 @@ export function SettingsPanel(props: Props) {
   const [tab, setTab] = useState<Tab>('zoom');
   const [presetName, setPresetName] = useState('');
 
-  const tabs: { id: Tab; label: string }[] = [
-    { id: 'zoom', label: 'Zoom' },
-    { id: 'cursor', label: 'Cursor' },
-    { id: 'camera', label: 'Camera' },
-    { id: 'frame', label: 'Frame' },
-    { id: 'edit', label: 'Edit' },
-    { id: 'export', label: 'Export' },
+  const tabs: { id: Tab; label: string; icon: ComponentType<LucideProps> }[] = [
+    { id: 'zoom', label: 'Zoom', icon: ZoomIn },
+    { id: 'cursor', label: 'Cursor', icon: MousePointer2 },
+    { id: 'camera', label: 'Camera', icon: Camera },
+    { id: 'frame', label: 'Frame', icon: Frame },
+    { id: 'edit', label: 'Edit', icon: Scissors },
+    ...(FEATURES.SUBTITLES ? [{ id: 'subtitles' as const, label: 'Subtitles', icon: Captions }] : []),
+    { id: 'export', label: 'Export', icon: Upload },
   ];
 
   const formats: { value: ExportFormat; label: string }[] = [
@@ -63,19 +67,27 @@ export function SettingsPanel(props: Props) {
   ];
 
   return (
-    <div className="flex h-full flex-col bg-gray-900">
-      <div className="flex border-b border-gray-800">
-        {tabs.map((t) => (
-          <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
-            className={`flex-1 py-2 text-xs font-medium ${
-              tab === t.id ? 'border-b-2 border-primary-500 text-white' : 'text-gray-400 hover:text-gray-200'
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
+    <div className="flex h-full flex-col bg-ink">
+      <div role="tablist" className="flex flex-wrap gap-1 border-b border-line px-2 py-2">
+        {tabs.map((t) => {
+          const TabIcon = t.icon;
+          return (
+            <button
+              key={t.id}
+              role="tab"
+              aria-selected={tab === t.id}
+              onClick={() => setTab(t.id)}
+              className={`flex h-7 items-center gap-1 whitespace-nowrap rounded-full border px-2.5 text-[11px] font-medium transition-colors ${
+                tab === t.id
+                  ? 'border-paper bg-paper text-ink'
+                  : 'border-line bg-card text-fog hover:border-line-strong hover:text-paper'
+              }`}
+            >
+              <TabIcon className="h-3 w-3" />
+              {t.label}
+            </button>
+          );
+        })}
       </div>
 
       <div className="flex-1 overflow-y-auto">
@@ -85,7 +97,7 @@ export function SettingsPanel(props: Props) {
               <Section
                 title={`Selected ${props.selectedZoom.source === 'auto' ? 'auto' : 'manual'} zoom`}
                 action={
-                  <button className="text-xs text-red-400 hover:text-red-300" onClick={() => props.onZoomDelete(props.selectedZoom!.id)}>
+                  <button className="font-mono text-[10px] text-fog hover:text-paper" onClick={() => props.onZoomDelete(props.selectedZoom!.id)}>
                     Delete
                   </button>
                 }
@@ -126,7 +138,7 @@ export function SettingsPanel(props: Props) {
             <Section
               title="Automatic zoom"
               action={
-                <button className="text-xs text-primary-400 hover:text-primary-300" onClick={props.onAddZoom}>
+                <button className="font-mono text-[10px] text-violet hover:text-paper" onClick={props.onAddZoom}>
                   + Zoom at playhead
                 </button>
               }
@@ -136,7 +148,7 @@ export function SettingsPanel(props: Props) {
                   No page tracking in this recording — zooms come from smart auto-framing of on-screen activity.
                 </p>
               )}
-              <Toggle label="Auto zoom" checked={s.zoom.auto} onChange={(v) => onSettings({ zoom: { auto: v } })} />
+              <Toggle lead label="Auto zoom" checked={s.zoom.auto} onChange={(v) => onSettings({ zoom: { auto: v } })} />
               <Slider
                 label="Intensity"
                 value={s.zoom.intensity}
@@ -189,7 +201,7 @@ export function SettingsPanel(props: Props) {
           <>
             <Section title="Cursor">
               {!props.hasTracking && <p className="text-xs text-gray-500">Cursor effects need page tracking (record “This tab”).</p>}
-              <Toggle label="Highlight" checked={s.cursor.highlight} onChange={(v) => onSettings({ cursor: { highlight: v } })} />
+              <Toggle lead label="Highlight" checked={s.cursor.highlight} onChange={(v) => onSettings({ cursor: { highlight: v } })} />
               <ColorInput label="Highlight color" value={s.cursor.highlightColor} onChange={(v) => onSettings({ cursor: { highlightColor: v } })} />
               <Slider
                 label="Highlight size"
@@ -240,7 +252,7 @@ export function SettingsPanel(props: Props) {
               <>
                 {!project.cameraOnly && (
                   <>
-                    <Toggle label="Show webcam" checked={s.webcam.visible} onChange={(v) => onSettings({ webcam: { visible: v } })} />
+                    <Toggle lead label="Show webcam" checked={s.webcam.visible} onChange={(v) => onSettings({ webcam: { visible: v } })} />
                     <Segmented<WebcamShape>
                       value={s.webcam.shape}
                       onChange={(v) => onSettings({ webcam: { shape: v } })}
@@ -397,7 +409,7 @@ export function SettingsPanel(props: Props) {
                   onChange={(v) => props.onSilenceChange({ ...props.silence, minSilenceMs: v })}
                 />
                 <button
-                  className="mt-1 w-full rounded-md bg-gray-800 py-1.5 text-xs text-gray-200 hover:bg-gray-700 disabled:opacity-40"
+                  className="btn-pill mt-1 w-full justify-center"
                   disabled={props.silenceFound.count === 0}
                   onClick={props.onRemoveSilences}
                 >
@@ -420,7 +432,7 @@ export function SettingsPanel(props: Props) {
                     </button>
                   ))}
                   <button
-                    className="mt-1 w-full rounded-md bg-gray-800 py-1.5 text-xs text-gray-200 hover:bg-gray-700"
+                    className="btn-pill mt-1 w-full justify-center"
                     onClick={props.onKeepHighlights}
                   >
                     Keep only highlights (highlight reel)
@@ -433,7 +445,7 @@ export function SettingsPanel(props: Props) {
             <Section
               title="Chapters"
               action={
-                <button className="text-xs text-primary-400 hover:text-primary-300" onClick={props.onChapterAdd}>
+                <button className="font-mono text-[10px] text-violet hover:text-paper" onClick={props.onChapterAdd}>
                   + At playhead
                 </button>
               }
@@ -448,7 +460,7 @@ export function SettingsPanel(props: Props) {
                     onChange={(e) => props.onChapterRename(i, e.target.value)}
                     className="flex-1 rounded bg-gray-800 px-2 py-0.5 text-xs text-gray-100"
                   />
-                  <button className="text-xs text-gray-500 hover:text-red-400" onClick={() => props.onChapterDelete(i)}>
+                  <button className="text-xs text-gray-500 hover:text-paper" onClick={() => props.onChapterDelete(i)}>
                     ✕
                   </button>
                 </div>
@@ -462,6 +474,10 @@ export function SettingsPanel(props: Props) {
               </Section>
             )}
           </>
+        )}
+
+        {tab === 'subtitles' && FEATURES.SUBTITLES && (
+          <SubtitlesPanel project={project} onSettings={onSettings} {...props.subtitles} />
         )}
 
         {tab === 'export' && (
@@ -526,7 +542,7 @@ export function SettingsPanel(props: Props) {
               <button
                 onClick={props.onExport}
                 disabled={props.exporting}
-                className="w-full rounded-lg bg-primary-600 py-2 text-sm font-semibold text-white hover:bg-primary-500 disabled:opacity-50"
+                className="btn-rec h-10 w-full justify-center text-[12px]"
               >
                 Export {s.export.format.toUpperCase()}
               </button>
@@ -550,7 +566,7 @@ export function SettingsPanel(props: Props) {
                     placeholder="Save this look as…"
                     className="flex-1 rounded bg-gray-800 px-2 py-1 text-xs text-gray-100"
                   />
-                  <button type="submit" className="text-xs text-primary-400 hover:text-primary-300">
+                  <button type="submit" className="font-mono text-[10px] text-violet hover:text-paper">
                     Save
                   </button>
                 </form>

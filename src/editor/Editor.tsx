@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { EditorData } from '../recorder/RecorderPage';
-import type { DeepPartial, EffectsSettings, Point, Range, ZoomRegion } from '../shared/types';
+import type { DeepPartial, EffectsSettings, Point, Range, SubtitleCue, ZoomRegion } from '../shared/types';
 import { deepMerge, persistableEffects } from '../shared/settings';
 import { loadState, nextFileCounter, saveState } from '../shared/storage';
 import { buildFilename } from '../shared/filename';
@@ -11,18 +11,48 @@ import { detectSilences, type SilenceOptions } from '../analysis/silence';
 import { exportRecording } from '../export/exporter';
 import { downloadBlob } from '../utils/download';
 import { formatDuration, formatFileSize } from '../utils/format';
-import { PauseIcon, PlayIcon, ScissorsIcon, ZoomIcon, DownloadIcon } from '../components/Icons';
+import { Pause, Play, Scissors, ShieldCheck, Upload, X, ZoomIn } from 'lucide-react';
 import { hasPointerTracking, type Project } from './project';
 import { PreviewPlayer, type PreviewHandle } from './PreviewPlayer';
 import { TimelineView } from './TimelineView';
 import { SettingsPanel, type BlurState } from './SettingsPanel';
-import { addCut, keptSegments, outputDuration, removeCutAt, setTrim, sourceToOutput } from './timeline';
+import { addCut, keptSegments, outputDuration, outputToSource, removeCutAt, setTrim, sourceToOutput } from './timeline';
+import type { SubtitleActions, SubtitleJob } from './SubtitlesPanel';
+import { transcribe } from '../subtitles/transcriber';
+import {
+  mergeWithNext,
+  newCueId,
+  parseSubtitles,
+  shiftCues,
+  sortCues,
+  splitCue,
+  toSrt,
+  toVtt,
+} from '../subtitles/subtitles';
 
 const SETTINGS_SAVE_DELAY_MS = 500;
+/** Shortest subtitle worth adding at the playhead */
+const MIN_CUE_MS = 200;
 
 export function Editor({ data }: { data: EditorData }) {
   const [project, setProject] = useState<Project>(data.project);
-  const scene = useMemo(() => buildScene(project), [project]);
+  // Zooms and the camera path are expensive to build (a pass over the whole recording), so they
+  // are keyed only on what buildScene reads -- editing a subtitle must not rebuild the camera
+  const built = useMemo(
+    () => buildScene(project),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [
+      project.events,
+      project.activity,
+      project.settings.zoom,
+      project.duration,
+      project.cameraOnly,
+      project.suppressedZoomIds,
+      project.manualZooms,
+    ]
+  );
+  // ...but everything downstream still needs the current project (subtitles, cuts, styling)
+  const scene = useMemo(() => ({ ...built, project }), [built, project]);
   const playerRef = useRef<PreviewHandle>(null);
 
   const [time, setTime] = useState(0);
@@ -31,6 +61,9 @@ export function Editor({ data }: { data: EditorData }) {
   const [selectedZoomId, setSelectedZoomId] = useState<string | null>(null);
   const [blurState, setBlurState] = useState<BlurState>('off');
   const [silence, setSilence] = useState<SilenceOptions>({ thresholdDb: -45, minSilenceMs: 1200, paddingMs: 200 });
+  const [selectedCueId, setSelectedCueId] = useState<string | null>(null);
+  const [subtitleJob, setSubtitleJob] = useState<SubtitleJob | null>(null);
+  const subtitleAbortRef = useRef<AbortController | null>(null);
   const [exportProgress, setExportProgress] = useState<number | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -149,6 +182,143 @@ export function Editor({ data }: { data: EditorData }) {
     setNotice('Kept only the highlights. Click a cut in the timeline to restore it.');
   };
 
+  /* ---------------- Subtitles ---------------- */
+
+  const setCues = useCallback((update: (cues: SubtitleCue[]) => SubtitleCue[]) => {
+    setProject((p) => ({ ...p, subtitles: update(p.subtitles) }));
+  }, []);
+
+  const selectCue = useCallback((id: string | null) => {
+    setSelectedCueId(id);
+    if (id) setSelectedZoomId(null);
+  }, []);
+
+  const deleteCue = useCallback(
+    (id: string) => {
+      setCues((cues) => cues.filter((c) => c.id !== id));
+      setSelectedCueId((s) => (s === id ? null : s));
+    },
+    [setCues]
+  );
+
+  const generateSubtitles = async () => {
+    if (project.subtitles.length && !window.confirm(`Replace the ${project.subtitles.length} existing subtitles?`)) return;
+    const previous = project.subtitles;
+    const controller = new AbortController();
+    subtitleAbortRef.current = controller;
+    setSubtitleJob({ stage: 'starting' });
+    setSelectedCueId(null);
+    setNotice(null);
+    let partial: SubtitleCue[] = [];
+    try {
+      const cues = await transcribe({
+        blob: data.mainBlob,
+        durationMs: duration,
+        cuts: project.cuts,
+        envelope: data.analysis.envelope,
+        envelopeWindowMs: data.analysis.envelopeWindowMs,
+        model: settings.subtitles.model,
+        language: settings.subtitles.language,
+        maxChars: settings.subtitles.maxChars,
+        onStatus: setSubtitleJob,
+        onPartial: (found) => {
+          partial = found;
+          setCues(() => found);
+        },
+        signal: controller.signal,
+      });
+      setCues(() => cues);
+      setNotice(cues.length ? `Generated ${cues.length} subtitles. Review them in the Subs tab.` : 'No speech found.');
+    } catch (err) {
+      const e = err as Error;
+      if (e.name === 'AbortError') {
+        setCues(() => (partial.length ? partial : previous));
+        setNotice(partial.length ? `Stopped. Kept ${partial.length} subtitles found so far.` : 'Subtitle generation canceled.');
+      } else {
+        setCues(() => previous);
+        setNotice(`Could not generate subtitles: ${e.message}`);
+      }
+    } finally {
+      setSubtitleJob(null);
+      subtitleAbortRef.current = null;
+    }
+  };
+
+  // Stop transcribing if the editor goes away
+  useEffect(() => () => subtitleAbortRef.current?.abort(), []);
+
+  const addCue = () => {
+    const next = project.subtitles.find((c) => c.start > time);
+    const start = Math.min(time, Math.max(0, duration - 500));
+    // Never run past the following cue: overlapping cues hide each other in the preview and export
+    const end = Math.min(start + 2500, next ? next.start : duration, duration);
+    if (end - start < MIN_CUE_MS) {
+      setNotice('Not enough room for a subtitle here. Move the playhead further from the next one.');
+      return;
+    }
+    const cue: SubtitleCue = { id: newCueId(), start, end, text: '' };
+    setCues((cues) => sortCues([...cues, cue]));
+    selectCue(cue.id);
+  };
+
+  const importSubtitles = async (file: File) => {
+    let parsed: ReturnType<typeof parseSubtitles>;
+    try {
+      parsed = parseSubtitles(await file.text());
+    } catch (e) {
+      setNotice(`Could not read ${file.name}: ${(e as Error).message}`);
+      return;
+    }
+    if (!parsed.length) {
+      setNotice(`No subtitles found in ${file.name}.`);
+      return;
+    }
+    if (project.subtitles.length && !window.confirm(`Replace the ${project.subtitles.length} existing subtitles?`)) return;
+    // Files describe the edited video, so map their times back onto the recording
+    // Cues that fall entirely inside a cut collapse to zero length and are dropped
+    const cues = sortCues(
+      parsed.map((c) => ({
+        id: newCueId(),
+        start: outputToSource(c.start, duration, project.cuts),
+        end: outputToSource(c.end, duration, project.cuts),
+        text: c.text,
+      }))
+    ).filter((c) => c.end > c.start);
+    setCues(() => cues);
+    setSelectedCueId(null);
+    setNotice(`Imported ${cues.length} subtitles from ${file.name}.`);
+  };
+
+  const downloadSubtitles = async (format: 'srt' | 'vtt') => {
+    const text = (format === 'srt' ? toSrt : toVtt)(project.subtitles, duration, project.cuts, settings.subtitles.maxChars);
+    const name = filenameFor(await nextFileCounter(), format);
+    await downloadBlob(new Blob([text], { type: format === 'srt' ? 'application/x-subrip' : 'text/vtt' }), name);
+    setNotice(`Saved ${name}`);
+  };
+
+  const subtitleActions: SubtitleActions = {
+    job: subtitleJob,
+    time,
+    selectedCueId,
+    onSelectCue: selectCue,
+    onGenerate: generateSubtitles,
+    onCancel: () => subtitleAbortRef.current?.abort(),
+    onCueChange: (cue) => setCues((cues) => sortCues(cues.map((c) => (c.id === cue.id ? cue : c)))),
+    onCueDelete: deleteCue,
+    onCueAdd: addCue,
+    onCueSplit: (id) => setCues((cues) => splitCue(cues, id, time)),
+    onCueMerge: (id) => setCues((cues) => mergeWithNext(cues, id)),
+    onShift: (delta) => setCues((cues) => shiftCues(cues, delta, duration)),
+    onImport: importSubtitles,
+    onDownload: downloadSubtitles,
+    onClear: () => {
+      if (!window.confirm('Delete all subtitles?')) return;
+      setCues(() => []);
+      setSelectedCueId(null);
+    },
+    onSeek: seek,
+  };
+
   /* ---------------- Export ---------------- */
 
   const filenameFor = (counter: number, ext: string) =>
@@ -225,90 +395,108 @@ export function Editor({ data }: { data: EditorData }) {
       } else if (e.key === 'Delete' || e.key === 'Backspace') {
         if (selection) cutSelection();
         else if (selectedZoomId) deleteZoom(selectedZoomId);
+        else if (selectedCueId && !subtitleJob) deleteCue(selectedCueId);
       } else if (e.key === 'z' || e.key === 'Z') {
         addZoom();
       } else if (e.key === 'Escape') {
         setSelection(null);
         setSelectedZoomId(null);
+        setSelectedCueId(null);
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [selection, selectedZoomId, cutSelection, deleteZoom, addZoom]);
+  }, [selection, selectedZoomId, selectedCueId, subtitleJob, cutSelection, deleteZoom, deleteCue, addZoom]);
 
   const outDuration = outputDuration(duration, project.cuts);
 
   return (
-    <div className="flex h-screen flex-col bg-gray-950 text-gray-100">
+    <div className="flex h-screen flex-col bg-deep text-paper">
       {/* Header */}
-      <header className="flex items-center gap-3 border-b border-gray-800 bg-gray-900 px-4 py-2">
-        <h1 className="font-semibold">Qamrec</h1>
-        <span className="truncate text-xs text-gray-400">
-          {project.title || 'Recording'} · {formatDuration(outDuration)}
-          {outDuration < duration && <span className="text-gray-500"> (of {formatDuration(duration)})</span>}
+      <header className="flex h-12 flex-shrink-0 items-center gap-3 border-b border-line bg-ink px-4">
+        <div className="h-6 w-6 flex-shrink-0 rounded-full bg-accent-br shadow-orb" />
+        <h1 className="text-[12px] font-bold tracking-wide">Qamrec</h1>
+        <span className="text-line" aria-hidden>
+          —
         </span>
-        {notice && <span className="ml-4 truncate text-xs text-green-400">{notice}</span>}
-        <div className="ml-auto flex items-center gap-2">
-          <button className="btn-secondary px-3 py-1 text-xs" onClick={() => window.close()}>
-            Close
+        <span className="truncate text-[12px] text-paper/80">
+          {project.title || 'Untitled recording'} • {formatDuration(outDuration)}
+          {outDuration < duration && <span className="text-fog/60"> of {formatDuration(duration)}</span>} •{' '}
+          {project.sourceWidth}×{project.sourceHeight}
+        </span>
+        <span className="hidden flex-shrink-0 items-center gap-1 rounded-full border border-line bg-card px-2 py-0.5 font-mono text-[10px] text-fog md:flex">
+          <ShieldCheck className="h-3 w-3" /> LOCAL
+        </span>
+        {notice && (
+          <span role="status" className="ml-2 truncate font-mono text-[11px] text-fog">
+            {notice}
+          </span>
+        )}
+        <div className="ml-auto flex flex-shrink-0 items-center gap-2">
+          <button className="btn-pill" onClick={() => window.close()}>
+            <X className="h-3.5 w-3.5" /> Close
           </button>
-          <button
-            className="btn-primary flex items-center gap-1 px-3 py-1 text-xs"
-            onClick={doExport}
-            disabled={exportProgress !== null}
-          >
-            <DownloadIcon className="h-3.5 w-3.5" />
+          <button className="btn-rec" onClick={doExport} disabled={exportProgress !== null}>
+            <Upload className="h-3.5 w-3.5" />
             Export {settings.export.format.toUpperCase()}
           </button>
         </div>
       </header>
 
       <div className="flex min-h-0 flex-1">
-        <div className="flex min-w-0 flex-1 flex-col">
-          <div className="min-h-0 flex-1 p-4">
-            <PreviewPlayer
-              ref={playerRef}
-              scene={scene}
-              mainUrl={mainUrl}
-              webcamUrl={webcamUrl}
-              selectedZoom={selectedZoom}
-              onTime={setTime}
-              onPlayingChange={setPlaying}
-              onPickFocus={pickFocus}
-              onWebcamMove={(x, y) => updateSettings({ webcam: { x, y } })}
-            />
-          </div>
+        <div className="flex min-w-0 flex-1 flex-col bg-ink">
+          {/* Stage */}
+          <div className="flex min-h-0 flex-1 flex-col px-4 pt-4 lg:px-6 lg:pt-5">
+            <div className="relative min-h-0 flex-1 overflow-hidden rounded-2xl border border-line bg-gradient-to-br from-[#1A1028] via-[#241A2E] to-[#1E1A14] p-3">
+              <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-violet/15 via-transparent to-ember/15" />
+              <PreviewPlayer
+                ref={playerRef}
+                scene={scene}
+                mainUrl={mainUrl}
+                webcamUrl={webcamUrl}
+                selectedZoom={selectedZoom}
+                onTime={setTime}
+                onPlayingChange={setPlaying}
+                onPickFocus={pickFocus}
+                onWebcamMove={(x, y) => updateSettings({ webcam: { x, y } })}
+              />
+            </div>
 
-          {/* Transport */}
-          <div className="flex items-center gap-2 border-t border-gray-800 bg-gray-900 px-4 py-2 text-xs">
-            <button
-              className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-700 hover:bg-gray-600"
-              onClick={() => playerRef.current?.toggle()}
-              title="Play/Pause (Space)"
-            >
-              {playing ? <PauseIcon className="h-4 w-4" /> : <PlayIcon className="h-4 w-4" />}
-            </button>
-            <span className="w-28 font-mono text-gray-300">
-              {formatDuration(sourceToOutput(time, duration, project.cuts))} / {formatDuration(outDuration)}
-            </span>
-            <button
-              className="flex items-center gap-1 rounded bg-gray-800 px-2 py-1 hover:bg-gray-700 disabled:opacity-40"
-              disabled={!selection}
-              onClick={cutSelection}
-              title="Cut the selected range (Delete)"
-            >
-              <ScissorsIcon /> Cut selection
-            </button>
-            <button
-              className="flex items-center gap-1 rounded bg-gray-800 px-2 py-1 hover:bg-gray-700"
-              onClick={addZoom}
-              title="Add a zoom keyframe at the playhead (Z)"
-            >
-              <ZoomIcon /> Add zoom
-            </button>
-            <span className="ml-auto text-gray-500">
-              Drag on the clip to select · yellow handles trim · drag zoom blocks to retime
-            </span>
+            {/* Transport */}
+            <div className="flex items-center justify-between gap-3 py-2.5">
+              <div className="flex items-center gap-2 rounded-full border border-white/10 bg-black/70 px-2 py-1.5 backdrop-blur">
+                <button
+                  className="flex h-7 w-7 items-center justify-center rounded-full bg-white text-black hover:bg-paper"
+                  onClick={() => playerRef.current?.toggle()}
+                  title="Play/Pause (Space)"
+                  aria-label={playing ? 'Pause' : 'Play'}
+                >
+                  {playing ? <Pause className="h-3.5 w-3.5 fill-black" /> : <Play className="ml-[1px] h-3.5 w-3.5 fill-black" />}
+                </button>
+                <span className="px-1 font-mono text-[11px] text-white/70">
+                  {formatDuration(sourceToOutput(time, duration, project.cuts))} / {formatDuration(outDuration)}
+                </span>
+                <span className="mx-0.5 h-4 w-px bg-white/15" />
+                <button
+                  className="flex h-7 items-center gap-1.5 rounded-full px-2.5 text-[11px] text-white/70 hover:bg-white/10 hover:text-white disabled:opacity-35 disabled:hover:bg-transparent"
+                  disabled={!selection}
+                  onClick={cutSelection}
+                  title="Cut the selected range (Delete)"
+                >
+                  <Scissors className="h-3.5 w-3.5" /> Cut
+                </button>
+                <button
+                  className="flex h-7 items-center gap-1.5 rounded-full px-2.5 text-[11px] text-white/70 hover:bg-white/10 hover:text-white"
+                  onClick={addZoom}
+                  title="Add a zoom keyframe at the playhead (Z)"
+                >
+                  <ZoomIn className="h-3.5 w-3.5" /> Add zoom
+                </button>
+              </div>
+              <span className="hidden truncate font-mono text-[10px] text-fog/50 xl:block">
+                Drag the clip to select • yellow handles trim • drag blocks to retime
+              </span>
+            </div>
           </div>
 
           <TimelineView
@@ -320,17 +508,24 @@ export function Editor({ data }: { data: EditorData }) {
             selectedZoomId={selectedZoomId}
             onSeek={seek}
             onSelection={setSelection}
-            onSelectZoom={setSelectedZoomId}
+            onSelectZoom={(id) => {
+              setSelectedZoomId(id);
+              if (id) setSelectedCueId(null);
+            }}
             onChangeZoom={changeZoom}
             onRestoreZoom={(id) =>
               setProject((p) => ({ ...p, suppressedZoomIds: p.suppressedZoomIds.filter((s) => s !== id) }))
             }
             onTrim={(start, end) => setProject((p) => ({ ...p, cuts: setTrim(p.cuts, p.duration, start, end) }))}
             onRestoreCut={(t) => setProject((p) => ({ ...p, cuts: removeCutAt(p.cuts, t) }))}
+            selectedCueId={selectedCueId}
+            onSelectCue={selectCue}
+            // Each transcribed chunk replaces the whole list, so edits made meanwhile would be lost
+            onChangeCue={subtitleJob ? () => {} : subtitleActions.onCueChange}
           />
         </div>
 
-        <aside className="w-80 flex-shrink-0 border-l border-gray-800">
+        <aside className="w-[320px] flex-shrink-0 border-l border-line bg-ink">
           <SettingsPanel
             project={project}
             hasTracking={hasTracking}
@@ -364,21 +559,23 @@ export function Editor({ data }: { data: EditorData }) {
             onExport={doExport}
             onSaveOriginal={saveOriginal}
             onSavePreset={savePreset}
+            subtitles={subtitleActions}
           />
         </aside>
       </div>
 
       {/* Export progress */}
       {exportProgress !== null && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80">
-          <div className="w-80 rounded-lg bg-gray-800 p-6 text-center">
-            <p className="mb-3 font-medium">
-              Rendering {settings.export.format.toUpperCase()}… {Math.round(exportProgress * 100)}%
-            </p>
-            <div className="mb-4 h-2 w-full overflow-hidden rounded-full bg-gray-700">
-              <div className="h-full bg-primary-500 transition-[width]" style={{ width: `${exportProgress * 100}%` }} />
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
+          <div role="dialog" aria-label="Exporting" className="w-80 rounded-2xl border border-line bg-card p-5 shadow-panel">
+            <div className="mb-3 flex items-center justify-between">
+              <span className="label-mono">Rendering {settings.export.format.toUpperCase()}</span>
+              <span className="font-mono text-[11px] text-paper">{Math.round(exportProgress * 100)}%</span>
             </div>
-            <button className="btn-secondary text-sm" onClick={() => abortRef.current?.abort()}>
+            <div className="mb-4 h-1 w-full overflow-hidden rounded-full bg-line">
+              <div className="h-full bg-accent transition-[width]" style={{ width: `${exportProgress * 100}%` }} />
+            </div>
+            <button className="btn-pill w-full justify-center" onClick={() => abortRef.current?.abort()}>
               Cancel
             </button>
           </div>

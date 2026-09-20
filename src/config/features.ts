@@ -41,6 +41,9 @@ export const FEATURES = {
   /** Enable automatic silence removal */
   SILENCE_REMOVAL: true,
 
+  /** Enable subtitles: on-device speech-to-text (Whisper), editing, SRT/VTT import & export */
+  SUBTITLES: true,
+
   /** Enable scheduled/timed recordings */
   SCHEDULED_RECORDING: true,
 

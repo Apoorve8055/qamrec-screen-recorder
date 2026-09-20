@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { PauseIcon, PlayIcon, StopIcon, MarkerIcon } from '../components/Icons';
+import { Film, Flag, GripHorizontal, Pause, Play, Square } from 'lucide-react';
 import { LevelMeter } from '../components/ui';
 import { FEATURES } from '../config/features';
 import { formatDuration } from '../utils/format';
@@ -156,6 +156,7 @@ export function RecorderPage() {
         suppressedZoomIds: [],
         chapters: buildChapters(analysis.sceneCuts, events, duration, CHAPTER_MIN_GAP_MS),
         highlights: detectHighlights(events, analysis.activity, duration, { windowMs: 6000, count: 3 }),
+        subtitles: [],
         settings: effectsForRecording(stored.effects, options),
       };
       setEditorData({
@@ -316,42 +317,61 @@ export function RecorderPage() {
   }
 
   const limitMs = options.schedule.stopAfterMin ? options.schedule.stopAfterMin * 60_000 : null;
-  const modeLabel = { screen: 'Screen', tab: 'Tab', camera: 'Camera' }[options.source];
+  const modeLabel = { screen: 'Screen', tab: 'This tab', camera: 'Camera' }[options.source];
+  const live = phase === 'recording' && !paused;
+  const trackingLabel =
+    tracking?.connected && tracking.aligned
+      ? `Tracking clicks and keys${tracking.title ? `: ${tracking.title}` : ''}`
+      : options.source !== 'camera'
+        ? trackingNote ?? 'Smart auto-framing from on-screen motion'
+        : null;
 
   return (
-    <div className="flex h-screen flex-col bg-gray-900 text-white">
+    <div className="flex h-screen flex-col bg-deep text-paper">
+      {/* Title strip */}
+      <div className="flex h-7 flex-shrink-0 items-center justify-between border-b border-line bg-card px-3">
+        <span className="flex items-center gap-1.5 font-mono text-[10px] text-fog/50">
+          <GripHorizontal className="h-3 w-3" /> Qamrec HUD
+        </span>
+        <span className="font-mono text-[10px] text-fog/50">{modeLabel}</span>
+      </div>
+
       {error && (
-        <div className="m-3 rounded-lg bg-red-600 px-4 py-3 text-sm">
-          <p>{error}</p>
-          <div className="mt-2 flex gap-3">
-            <button className="underline" onClick={() => window.location.reload()}>
-              Try again
-            </button>
-            <button className="underline" onClick={() => window.close()}>
-              Close
-            </button>
+        <div className="flex flex-1 items-center justify-center p-6">
+          <div role="alert" className="w-full max-w-sm rounded-2xl border border-rec/40 bg-card p-5">
+            <div className="label-mono mb-2 text-rec">Recording couldn’t start</div>
+            <p className="text-[13px] text-paper">{error}</p>
+            <div className="mt-4 flex gap-2">
+              <button className="btn-accent h-8 px-4 text-[11px]" onClick={() => window.location.reload()}>
+                Try again
+              </button>
+              <button className="btn-pill" onClick={() => window.close()}>
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}
 
       {phase === 'acquiring' && (
-        <div className="flex flex-1 items-center justify-center">
-          <div className="text-center">
-            <div className="mx-auto mb-3 h-12 w-12 animate-spin rounded-full border-4 border-primary-500 border-t-transparent" />
-            <p className="text-sm text-gray-400">
-              {options.source === 'screen' ? 'Choose what to share…' : 'Requesting permissions…'}
-            </p>
-          </div>
+        <div className="flex flex-1 flex-col items-center justify-center gap-4">
+          <div className="h-10 w-10 animate-spin rounded-full border-2 border-line border-t-violet border-r-ember" />
+          <p className="font-mono text-[11px] text-fog">
+            {options.source === 'screen' ? 'Choose what to share…' : 'Requesting permissions…'}
+          </p>
         </div>
       )}
 
       {phase === 'processing' && (
         <div className="flex flex-1 items-center justify-center">
-          <div className="w-72 text-center">
-            <p className="mb-3 text-sm text-gray-300">{processing.label}</p>
-            <div className="h-2 w-full overflow-hidden rounded-full bg-gray-700">
+          <div className="w-80">
+            <div className="mb-3 flex items-center justify-between font-mono text-[10px] text-fog">
+              <span>{processing.label}</span>
+              <span>{Math.round(processing.progress * 100)}%</span>
+            </div>
+            <div className="h-1 w-full overflow-hidden rounded-full bg-line">
               <div
-                className="h-full bg-primary-500 transition-[width]"
+                className="h-full bg-accent transition-[width]"
                 style={{ width: `${Math.round(processing.progress * 100)}%` }}
               />
             </div>
@@ -361,116 +381,157 @@ export function RecorderPage() {
 
       {(phase === 'waiting' || phase === 'countdown' || phase === 'recording') && (
         <>
-          <div className="relative min-h-0 flex-1 bg-black">
+          <div className="relative min-h-0 flex-1 overflow-hidden bg-deep">
             <video ref={liveVideoRef} className="h-full w-full object-contain" muted playsInline />
-            {options.webcam && (
-              <video
-                ref={webcamVideoRef}
-                className="absolute bottom-3 right-3 h-28 w-28 rounded-full border-2 border-white/70 object-cover shadow-xl"
-                style={{ transform: 'scaleX(-1)' }}
-                muted
-                playsInline
-              />
+
+            {/* Viewfinder: vignette, inner frame and corner marks */}
+            <div
+              className="pointer-events-none absolute inset-0"
+              style={{ background: 'radial-gradient(120% 120% at 50% 50%, transparent 60%, rgba(0,0,0,0.6) 100%)' }}
+            />
+            <div className="pointer-events-none absolute inset-2 border border-white/[0.06]" />
+            {['left-2 top-2 border-l border-t', 'right-2 top-2 border-r border-t', 'bottom-2 left-2 border-b border-l', 'bottom-2 right-2 border-b border-r'].map(
+              (pos) => (
+                <div key={pos} className={`pointer-events-none absolute h-4 w-4 border-white/25 ${pos}`} />
+              )
             )}
 
-            <div className="absolute left-2 top-2 flex items-center gap-2 rounded-full bg-black/60 px-3 py-1.5">
-              <div
-                className={`h-2.5 w-2.5 rounded-full ${
-                  phase !== 'recording' ? 'bg-gray-400' : paused ? 'bg-yellow-500' : 'bg-red-500 recording-pulse'
-                }`}
-              />
-              <span className="font-mono text-sm">{formatDuration(elapsed)}</span>
-              {paused && <span className="text-xs text-yellow-400">PAUSED</span>}
-              {limitMs !== null && phase === 'recording' && (
-                <span className="text-xs text-gray-400">· stops in {formatDuration(Math.max(0, limitMs - elapsed))}</span>
-              )}
-            </div>
-            <div className="absolute right-2 top-2 rounded-full bg-black/60 px-2 py-1 text-xs">{modeLabel}</div>
-
-            {phase === 'countdown' && (
-              <div className="absolute inset-0 flex items-center justify-center bg-black/50">
-                <span key={countdown} className="text-8xl font-bold text-white drop-shadow-lg">
-                  {countdown}
+            {/* Top bar: REC + timecode */}
+            <div className="absolute inset-x-0 top-0 flex h-9 items-center justify-between bg-gradient-to-b from-black/70 to-transparent px-4">
+              <div className="flex items-center gap-2">
+                <span
+                  className={`h-2 w-2 rounded-full ${
+                    live ? 'animate-blink bg-rec shadow-[0_0_6px_#FF3B30]' : paused ? 'bg-mark' : 'bg-white/30'
+                  }`}
+                />
+                <span className="font-mono text-[11px] font-bold tracking-[0.12em] text-white">
+                  {phase === 'recording' ? (paused ? 'PAUSED' : 'REC') : phase === 'countdown' ? 'READY' : 'STBY'}
                 </span>
+                <span className="font-mono text-[11px] tracking-widest text-white/70">{timecode(elapsed)}</span>
+                {limitMs !== null && phase === 'recording' && (
+                  <span className="font-mono text-[10px] text-white/40">stops in {formatDuration(Math.max(0, limitMs - elapsed))}</span>
+                )}
+              </div>
+              {tracking?.title && <span className="max-w-[40%] truncate font-mono text-[10px] text-white/40">{tracking.title}</span>}
+            </div>
+
+            {/* Audio meters */}
+            {(levels.system !== null || levels.mic !== null) && (
+              <div className="absolute bottom-4 left-4 flex flex-col gap-3 rounded-xl bg-black/40 px-3 py-2.5 backdrop-blur">
+                <LevelMeter label={options.source === 'tab' ? 'Tab' : 'Sys'} level={levels.system} />
+                <LevelMeter label="Mic" level={levels.mic} tone="white" />
               </div>
             )}
 
+            {/* Webcam: proves the camera is working */}
+            {options.webcam && (
+              <div className="absolute right-4 top-12 h-28 w-28 overflow-hidden rounded-full border border-white/15 bg-lift shadow-[0_4px_20px_rgba(0,0,0,0.5)]">
+                <video ref={webcamVideoRef} className="h-full w-full object-cover" style={{ transform: 'scaleX(-1)' }} muted playsInline />
+                <div className="absolute inset-x-0 bottom-0 h-[2px] bg-accent" />
+              </div>
+            )}
+
+            {/* Film leader countdown */}
+            {phase === 'countdown' && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center bg-deep">
+                <div
+                  className="absolute inset-0 opacity-[0.06]"
+                  style={{ backgroundImage: 'repeating-linear-gradient(0deg, transparent, transparent 2px, white 2px, white 3px)' }}
+                />
+                <div className="relative flex h-40 w-40 items-center justify-center rounded-full border-[6px] border-raised bg-[#111118]">
+                  <div className="absolute inset-2 rounded-full border border-dashed border-line opacity-40" />
+                  <span key={countdown} className="font-mono text-[76px] font-black tracking-tighter text-white">
+                    {countdown}
+                  </span>
+                  <div className="absolute -top-1 left-1/2 h-2 w-2 -translate-x-1/2 rotate-45 bg-paper" />
+                </div>
+                <div className="mt-6 flex items-center gap-2 font-mono text-[10px] tracking-[0.25em] text-white/30">
+                  <Film className="h-3 w-3" /> PICTURE START
+                </div>
+                <div className="mt-3 h-[2px] w-[72px] bg-accent" />
+                <button className="mt-8 font-mono text-[11px] text-white/40 hover:text-white/70" onClick={() => stopRef.current()}>
+                  CANCEL
+                </button>
+              </div>
+            )}
+
+            {/* Scheduled start */}
             {phase === 'waiting' && waitUntil && (
-              <div className="absolute inset-0 flex items-center justify-center bg-black/70">
-                <div className="text-center">
-                  <p className="text-sm text-gray-300">
-                    Recording starts at{' '}
-                    {new Date(waitUntil).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </p>
-                  <p className="my-2 font-mono text-5xl">{formatDuration(Math.max(0, waitUntil - now))}</p>
-                  <div className="flex justify-center gap-3">
-                    <button className="btn-primary text-sm" onClick={beginCountdown}>
-                      Start now
-                    </button>
-                    <button className="btn-secondary text-sm" onClick={() => stopRef.current()}>
-                      Cancel
-                    </button>
-                  </div>
+              <div className="absolute inset-0 flex flex-col items-center justify-center bg-deep/90">
+                <div className="label-mono">
+                  Starts at {new Date(waitUntil).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </div>
+                <p className="my-3 font-mono text-[56px] font-semibold tracking-tight">{timecode(Math.max(0, waitUntil - now))}</p>
+                <div className="flex gap-2">
+                  <button className="btn-accent h-9 px-5 text-[12px]" onClick={beginCountdown}>
+                    Start now
+                  </button>
+                  <button className="btn-pill h-9" onClick={() => stopRef.current()}>
+                    Cancel
+                  </button>
                 </div>
               </div>
             )}
           </div>
 
-          <div className="space-y-2 bg-gray-800 px-4 py-3">
-            <div className="flex items-center gap-3 text-xs">
-              {tracking?.connected && tracking.aligned ? (
-                <span className="rounded-full bg-green-600/20 px-2 py-0.5 text-green-300">
-                  Tracking clicks &amp; keys{tracking.title ? ` · ${tracking.title}` : ''}
+          {/* Control bar */}
+          <div className="flex h-12 flex-shrink-0 items-center gap-2 border-t border-line/60 bg-ink/95 px-3">
+            {phase === 'recording' && (
+              <>
+                <button
+                  className="btn-pill h-7"
+                  onClick={() => control(paused ? 'resume' : 'pause')}
+                  title={paused ? 'Resume (Alt+Shift+P)' : 'Pause (Alt+Shift+P)'}
+                >
+                  {paused ? <Play className="h-3 w-3" /> : <Pause className="h-3 w-3" />}
+                  {paused ? 'RESUME' : 'PAUSE'}
+                </button>
+                <button
+                  className="btn-pill h-7 w-7 justify-center px-0"
+                  onClick={() => control('marker')}
+                  title="Mark a highlight (Alt+Shift+M)"
+                  aria-label="Mark a highlight"
+                >
+                  <Flag className="h-3.5 w-3.5" />
+                </button>
+              </>
+            )}
+            <div className="flex min-w-0 flex-1 items-center gap-2 px-2">
+              {trackingLabel && (
+                <span
+                  className={`truncate rounded-full border px-2.5 py-0.5 font-mono text-[10px] ${
+                    tracking?.connected && tracking.aligned ? 'border-violet/30 text-paper/80' : 'border-line text-fog/60'
+                  }`}
+                >
+                  {trackingLabel}
                 </span>
-              ) : options.source !== 'camera' ? (
-                <span className="rounded-full bg-gray-700 px-2 py-0.5 text-gray-300">
-                  {trackingNote ?? 'Effects: smart auto-framing from on-screen motion'}
-                </span>
-              ) : null}
+              )}
               {warnings.map((w) => (
-                <span key={w} className="text-yellow-400">
+                <span key={w} className="truncate font-mono text-[10px] text-mark/80">
                   {w}
                 </span>
               ))}
             </div>
-            <div className="flex items-center gap-4">
-              <div className="w-56 space-y-1">
-                <LevelMeter label={options.source === 'tab' ? 'Tab' : 'System'} level={levels.system} />
-                <LevelMeter label="Mic" level={levels.mic} />
-              </div>
-              <div className="ml-auto flex items-center gap-3">
-                {phase === 'recording' && (
-                  <>
-                    <button
-                      onClick={() => control('marker')}
-                      className="flex h-10 w-10 items-center justify-center rounded-full bg-gray-700 hover:bg-gray-600"
-                      title="Mark a highlight (Alt+Shift+M)"
-                    >
-                      <MarkerIcon />
-                    </button>
-                    <button
-                      onClick={() => control(paused ? 'resume' : 'pause')}
-                      className={`flex h-12 w-12 items-center justify-center rounded-full ${
-                        paused ? 'bg-green-600 hover:bg-green-500' : 'bg-yellow-600 hover:bg-yellow-500'
-                      }`}
-                      title={paused ? 'Resume (Alt+Shift+P)' : 'Pause (Alt+Shift+P)'}
-                    >
-                      {paused ? <PlayIcon /> : <PauseIcon />}
-                    </button>
-                  </>
-                )}
-                <button
-                  onClick={() => stopRef.current()}
-                  className="flex h-14 w-14 items-center justify-center rounded-full bg-red-600 hover:bg-red-500"
-                  title={phase === 'recording' ? 'Stop (Alt+Shift+S)' : 'Cancel'}
-                >
-                  <StopIcon />
-                </button>
-              </div>
-            </div>
+            {phase === 'recording' ? (
+              <button className="btn-rec" onClick={() => stopRef.current()} title="Stop (Alt+Shift+S)">
+                <Square className="h-3 w-3 fill-white" />
+                STOP
+              </button>
+            ) : (
+              <button className="btn-pill" onClick={() => stopRef.current()}>
+                Cancel
+              </button>
+            )}
           </div>
         </>
       )}
     </div>
   );
+}
+
+/** HH:MM:SS */
+function timecode(ms: number): string {
+  const s = Math.floor(ms / 1000);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(Math.floor(s / 3600))}:${pad(Math.floor((s % 3600) / 60))}:${pad(s % 60)}`;
 }

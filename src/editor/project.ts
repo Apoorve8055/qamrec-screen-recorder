@@ -4,6 +4,7 @@ import type {
   Chapter,
   EffectsSettings,
   Range,
+  SubtitleCue,
   TimelineEvent,
   ZoomRegion,
 } from '../shared/types';
@@ -29,6 +30,8 @@ export interface Project {
   suppressedZoomIds: string[];
   chapters: Chapter[];
   highlights: Range[];
+  /** Subtitle cues, sorted by start */
+  subtitles: SubtitleCue[];
   settings: EffectsSettings;
 }
 

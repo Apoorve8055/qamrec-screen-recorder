@@ -108,6 +108,12 @@ export interface Chapter {
   title: string;
 }
 
+/** One subtitle cue, in source time */
+export interface SubtitleCue extends Range {
+  id: string;
+  text: string;
+}
+
 /* ------------------------------------------------------------------ */
 /* Effect / edit settings                                              */
 /* ------------------------------------------------------------------ */
@@ -174,6 +180,27 @@ export interface FrameSettings {
   chapterTitles: boolean;
 }
 
+/** Speech model size used to generate subtitles (larger = more accurate, slower, bigger download) */
+export type SubtitleModel = 'tiny' | 'base' | 'small';
+
+export interface SubtitleSettings {
+  /** Burn subtitles into the preview and exported video */
+  show: boolean;
+  position: 'bottom' | 'top';
+  /** Font size in px at 1080p output */
+  fontSize: number;
+  textColor: string;
+  /** Dark box behind the text (otherwise an outline) */
+  background: boolean;
+  /** Also embed a toggleable WebVTT track (WebM exports only -- MP4 can't carry one) */
+  embedTrack: boolean;
+  /** Characters per line when splitting generated text into cues */
+  maxChars: number;
+  /** Spoken language, or 'auto' to detect */
+  language: string;
+  model: SubtitleModel;
+}
+
 export type ExportFormat = 'mp4' | 'webm' | 'gif';
 export type ExportResolution = 'original' | 2160 | 1440 | 1080 | 720 | 480;
 
@@ -190,6 +217,7 @@ export interface EffectsSettings {
   keys: KeystrokeSettings;
   webcam: WebcamSettings;
   frame: FrameSettings;
+  subtitles: SubtitleSettings;
   export: ExportSettings;
 }
 

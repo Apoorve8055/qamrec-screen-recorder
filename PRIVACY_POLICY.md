@@ -12,7 +12,8 @@ Qamrec does **not collect, transmit, or share any personal or sensitive user dat
 
 * All screen, camera, and audio recordings are processed, analyzed, edited and encoded **locally in the user’s browser**
 * Recorded files are saved **only on the user’s device**
-* No data is uploaded to any server. Background blur runs a model bundled inside the extension; nothing is downloaded at runtime
+* No data is uploaded to any server. Background blur runs a model bundled inside the extension
+* **Subtitles** are generated on your device with the open-source Whisper speech model. The first time you click "Generate subtitles", the model's weights are downloaded from Hugging Face (huggingface.co) and cached in your browser. This download sends no recording, audio or personal data; your audio is transcribed locally and never leaves your computer
 
 #### Page Activity Tracking (for cinematic effects)
 
@@ -36,7 +37,7 @@ These permissions are used **only to enable recording, editing and saving files 
 * No analytics
 * No ads
 * No trackers
-* No third-party services
+* No third-party services (the only outside request is the one-time, optional speech model download described above)
 
 #### Contact
 

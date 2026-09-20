@@ -35,14 +35,19 @@ export async function analyzeRecording(
     const times: number[] = [];
     for (let t = 0; t < durationMs; t += stepMs) times.push(t);
 
+    // mediabunny's canvas already has a context created without `willReadFrequently`, and
+    // context attributes are fixed at creation, so read back from our own scratch canvas.
+    const scratch = new OffscreenCanvas(THUMB_W, THUMB_H);
+    const sctx = scratch.getContext('2d', { willReadFrequently: true })!;
+
     let prev: Uint8Array | null = null;
     let i = 0;
     for await (const wrapped of sink.canvasesAtTimestamps(times.map((t) => t / 1000))) {
       if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
       const t = times[i++];
       if (!wrapped) continue;
-      const ctx = wrapped.canvas.getContext('2d') as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
-      const gray = toGray(ctx.getImageData(0, 0, THUMB_W, THUMB_H).data, THUMB_W, THUMB_H);
+      sctx.drawImage(wrapped.canvas, 0, 0, THUMB_W, THUMB_H);
+      const gray = toGray(sctx.getImageData(0, 0, THUMB_W, THUMB_H).data, THUMB_W, THUMB_H);
       if (prev) {
         diffs.push({ t, diff: frameDiff(prev, gray) });
         const { bbox, amount } = changeBox(prev, gray, THUMB_W, THUMB_H);

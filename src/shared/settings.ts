@@ -53,6 +53,17 @@ export const DEFAULT_EFFECTS: EffectsSettings = {
     shadow: true,
     chapterTitles: false,
   },
+  subtitles: {
+    show: true,
+    position: 'bottom',
+    fontSize: 44,
+    textColor: '#ffffff',
+    background: true,
+    embedTrack: true,
+    maxChars: 42,
+    language: 'auto',
+    model: 'base',
+  },
   export: {
     format: 'mp4',
     resolution: 1080,

@@ -1,7 +1,53 @@
 /**
- * Small shared form controls (dark theme)
+ * Shared form controls (Qamrec design system)
  */
-import type { ReactNode } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
+
+/** The on/off lever. Gradient glow = on (never red). `size="lg"` is the lead lever of a group. */
+export function Lever({
+  checked,
+  onChange,
+  disabled = false,
+  size = 'sm',
+  label,
+}: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  disabled?: boolean;
+  size?: 'sm' | 'lg';
+  label?: string;
+}) {
+  const lg = size === 'lg';
+  // A lever that can't be used never glows, even if its setting is on
+  const on = checked && !disabled;
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+      className={`relative flex flex-shrink-0 items-center rounded-full p-[2px] transition-all duration-300 disabled:cursor-default ${
+        lg ? 'h-6 w-[42px]' : 'h-[18px] w-8'
+      } ${
+        on
+          ? lg
+            ? 'bg-accent shadow-glow'
+            : 'bg-paper'
+          : 'bg-line'
+      }`}
+    >
+      <span
+        className={`flex items-center justify-center rounded-full shadow-[0_1px_4px_rgba(0,0,0,0.4)] transition-transform duration-300 ${
+          lg ? 'h-5 w-5 bg-white' : `h-3.5 w-3.5 ${on ? 'bg-ink' : 'bg-fog/70'}`
+        } ${checked ? (lg ? 'translate-x-[18px]' : 'translate-x-[14px]') : 'translate-x-0'}`}
+      >
+        {lg && <span className={`h-1 w-1 rounded-full ${on ? 'bg-violet' : 'bg-fog/40'}`} />}
+      </span>
+    </button>
+  );
+}
 
 export function Toggle({
   label,
@@ -9,35 +55,24 @@ export function Toggle({
   onChange,
   disabled = false,
   hint,
+  lead = false,
 }: {
   label: string;
   checked: boolean;
   onChange: (v: boolean) => void;
   disabled?: boolean;
   hint?: string;
+  /** The main switch of a section: larger gradient lever, stronger label */
+  lead?: boolean;
 }) {
   return (
-    <label className={`flex items-center justify-between gap-3 py-1 ${disabled ? 'opacity-40' : 'cursor-pointer'}`}>
-      <span className="text-sm text-gray-200">
-        {label}
-        {hint && <span className="block text-xs text-gray-500">{hint}</span>}
+    // A label so the text and hint are part of the hit target, not just the small lever
+    <label className={`flex items-center justify-between gap-3 py-1.5 ${disabled ? 'cursor-default opacity-40' : 'cursor-pointer'}`}>
+      <span className="min-w-0">
+        <span className={lead ? 'text-[12px] font-semibold text-paper' : 'text-[11px] text-paper/80'}>{label}</span>
+        {hint && <span className="mt-0.5 block font-mono text-[10px] leading-snug text-fog/50">{hint}</span>}
       </span>
-      <button
-        type="button"
-        role="switch"
-        aria-checked={checked}
-        disabled={disabled}
-        onClick={() => onChange(!checked)}
-        className={`relative inline-flex h-5 w-9 flex-shrink-0 rounded-full transition-colors focus-ring ${
-          checked ? 'bg-primary-600' : 'bg-gray-600'
-        }`}
-      >
-        <span
-          className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform ${
-            checked ? 'translate-x-4' : 'translate-x-0.5'
-          }`}
-        />
-      </button>
+      <Lever checked={checked} onChange={onChange} disabled={disabled} size={lead ? 'lg' : 'sm'} label={label} />
     </label>
   );
 }
@@ -51,6 +86,7 @@ export function Slider({
   onChange,
   format = (v) => String(v),
   disabled = false,
+  hint,
 }: {
   label: string;
   value: number;
@@ -60,12 +96,16 @@ export function Slider({
   onChange: (v: number) => void;
   format?: (v: number) => string;
   disabled?: boolean;
+  hint?: string;
 }) {
+  const fill = `${((value - min) / (max - min)) * 100}%`;
   return (
     <label className={`block py-1 ${disabled ? 'opacity-40' : ''}`}>
-      <span className="flex justify-between text-xs text-gray-400 mb-1">
-        <span>{label}</span>
-        <span className="font-mono text-gray-300">{format(value)}</span>
+      <span className="mb-1 flex items-center justify-between">
+        <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-fog/60">{label}</span>
+        <span className="rounded border border-line bg-ink px-1.5 py-0.5 font-mono text-[10px] text-fog">
+          {format(value)}
+        </span>
       </span>
       <input
         type="range"
@@ -75,12 +115,15 @@ export function Slider({
         value={value}
         disabled={disabled}
         onChange={(e) => onChange(parseFloat(e.target.value))}
-        className="w-full accent-primary-500"
+        className="range"
+        style={{ '--fill': fill } as CSSProperties}
       />
+      {hint && <span className="block font-mono text-[10px] text-fog/40">{hint}</span>}
     </label>
   );
 }
 
+/** Pill group; the active option is a solid paper pill */
 export function Segmented<T extends string | number>({
   value,
   options,
@@ -93,16 +136,17 @@ export function Segmented<T extends string | number>({
   disabled?: boolean;
 }) {
   return (
-    <div className={`flex rounded-lg bg-gray-800 p-0.5 ${disabled ? 'opacity-40' : ''}`}>
+    <div className={`flex gap-1 rounded-full border border-line bg-ink p-0.5 ${disabled ? 'opacity-40' : ''}`}>
       {options.map((o) => (
         <button
           key={String(o.value)}
           type="button"
           title={o.title}
           disabled={disabled}
+          aria-pressed={o.value === value}
           onClick={() => onChange(o.value)}
-          className={`flex-1 rounded-md px-2 py-1 text-xs font-medium transition-colors ${
-            o.value === value ? 'bg-gray-600 text-white' : 'text-gray-400 hover:text-gray-200'
+          className={`flex-1 rounded-full px-2 py-1 text-[11px] font-medium transition-colors ${
+            o.value === value ? 'bg-paper text-ink' : 'text-fog/70 hover:text-paper'
           }`}
         >
           {o.label}
@@ -114,39 +158,51 @@ export function Segmented<T extends string | number>({
 
 export function ColorInput({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
   return (
-    <label className="flex items-center justify-between py-1 text-sm text-gray-200">
+    <label className="flex cursor-pointer items-center justify-between py-1.5 text-[11px] text-paper/80">
       {label}
-      <input
-        type="color"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="h-6 w-10 cursor-pointer rounded border border-gray-600 bg-transparent"
-      />
+      <span className="flex items-center gap-2">
+        <span className="font-mono text-[10px] uppercase text-fog/60">{value}</span>
+        <span className="relative h-6 w-6 overflow-hidden rounded-full border border-line-strong">
+          <input
+            type="color"
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            className="absolute -inset-2 h-10 w-10 cursor-pointer border-0 bg-transparent p-0"
+          />
+        </span>
+      </span>
     </label>
   );
 }
 
 export function Section({ title, children, action }: { title: string; children: ReactNode; action?: ReactNode }) {
   return (
-    <section className="border-b border-gray-800 px-4 py-3">
-      <div className="mb-2 flex items-center justify-between">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-400">{title}</h3>
+    <section className="border-b border-line/60 px-4 py-4">
+      <div className="mb-2.5 flex items-center justify-between">
+        <h3 className="label-mono">{title}</h3>
         {action}
       </div>
-      <div className="space-y-1">{children}</div>
+      <div className="space-y-1.5">{children}</div>
     </section>
   );
 }
 
-export function LevelMeter({ label, level }: { label: string; level: number | null }) {
+/** Segmented audio meter: gradient cells for system audio, white for the mic */
+export function LevelMeter({ label, level, tone = 'accent' }: { label: string; level: number | null; tone?: 'accent' | 'white' }) {
   if (level === null) return null;
-  const pct = Math.round(level * 100);
-  const color = pct > 90 ? 'bg-red-500' : pct > 70 ? 'bg-yellow-400' : 'bg-green-500';
+  const lit = Math.round(Math.min(1, level) * 12);
   return (
-    <div className="flex items-center gap-2 text-xs text-gray-400">
-      <span className="w-12">{label}</span>
-      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-gray-700">
-        <div className={`h-full ${color} transition-[width] duration-75`} style={{ width: `${pct}%` }} />
+    <div className="flex items-center gap-2" role="meter" aria-label={`${label} level`} aria-valuenow={Math.round(level * 100)}>
+      <span className="w-7 font-mono text-[8px] uppercase text-white/40">{label}</span>
+      <div className="flex h-1.5 w-[84px] gap-[2px] overflow-hidden rounded-full bg-white/10 p-[1px]">
+        {Array.from({ length: 12 }, (_, i) => (
+          <span
+            key={i}
+            className={`flex-1 rounded-full transition-colors duration-100 ${
+              i < lit ? (tone === 'accent' ? 'bg-accent-b' : 'bg-white') : 'bg-white/10'
+            }`}
+          />
+        ))}
       </div>
     </div>
   );
