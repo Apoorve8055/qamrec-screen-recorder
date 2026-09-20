@@ -1,12 +1,13 @@
 {
   "name": "qamrec-screen-recorder",
-  "version": "1.0.0",
-  "description": "Free & open-source screen and camera recorder Chrome extension",
+  "version": "2.0.0",
+  "description": "Free, private, cinematic screen and camera recorder for Chrome: auto-zoom, cursor and keystroke effects, on-device subtitles, and MP4/WebM/GIF export",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build && node scripts/copy-extension-files.js",
+    "build": "vite build && vite build -c vite.tracker.config.ts && node scripts/copy-extension-files.js",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
     "preview": "vite preview",
     "icons": "node scripts/generate-icons.js",
     "zip": "cd dist && zip -r ../qamrec-extension.zip ."
@@ -18,10 +19,18 @@
     "webm",
     "react"
   ],
-  "author": "",
+  "author": "Apoorve Verma (https://www.apoorveverma.com)",
+  "homepage": "https://www.apoorveverma.com",
   "license": "MIT",
   "dependencies": {
+    "@fontsource-variable/inter": "^5.3.0",
+    "@fontsource-variable/jetbrains-mono": "^5.3.0",
+    "@huggingface/transformers": "^4.3.0",
+    "@mediapipe/tasks-vision": "^1.0.1",
     "gifenc": "^1.0.3",
+    "lucide-react": "^1.47.0",
+    "mediabunny": "^1.58.1",
+    "onnxruntime-web": "1.31.0-dev.20260914-8d85527a0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },
@@ -35,6 +44,7 @@
     "postcss": "^8.4.33",
     "tailwindcss": "^3.4.1",
     "typescript": "^5.3.3",
-    "vite": "^5.0.12"
+    "vite": "^5.0.12",
+    "vitest": "^2.1.9"
   }
 }

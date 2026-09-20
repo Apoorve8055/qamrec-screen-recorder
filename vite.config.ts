@@ -48,6 +48,10 @@ function moveHtmlPlugin(): Plugin {
 export default defineConfig({
   plugins: [react(), moveHtmlPlugin()],
   base: './',
+  // The speech-to-text worker code-splits (lazy ONNX Runtime backends), which needs module workers
+  worker: {
+    format: 'es',
+  },
   build: {
     outDir: 'dist',
     emptyOutDir: true,

@@ -27,6 +27,15 @@ for (const size of iconSizes) {
   }
 }
 
+// Copy the MediaPipe runtime (background blur) - SIMD build only, supported by all target Chrome versions
+const mediapipeSrc = join(rootDir, 'node_modules', '@mediapipe', 'tasks-vision', 'wasm');
+const mediapipeDist = join(distDir, 'mediapipe');
+mkdirSync(mediapipeDist, { recursive: true });
+for (const file of ['vision_wasm_internal.js', 'vision_wasm_internal.wasm']) {
+  copyFileSync(join(mediapipeSrc, file), join(mediapipeDist, file));
+  console.log(`Copied: mediapipe/${file}`);
+}
+
 // Read and modify manifest for production
 const manifestSrc = join(rootDir, 'manifest.json');
 const manifest = JSON.parse(readFileSync(manifestSrc, 'utf-8'));

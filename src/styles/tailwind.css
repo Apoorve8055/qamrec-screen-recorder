@@ -1,58 +1,103 @@
+/* Fonts ship with the extension (no requests to font CDNs) */
+@import '@fontsource-variable/inter';
+@import '@fontsource-variable/jetbrains-mono';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* Base dark theme styles */
-body {
-  @apply bg-gray-900 text-gray-100;
-}
-
-/* Custom scrollbar for dark theme */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-
-::-webkit-scrollbar-track {
-  @apply bg-gray-800;
-}
-
-::-webkit-scrollbar-thumb {
-  @apply bg-gray-600 rounded;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  @apply bg-gray-500;
-}
-
-/* Focus ring styles */
-.focus-ring {
-  @apply focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 focus:ring-offset-gray-900;
-}
-
-/* Recording button pulse animation */
-@keyframes pulse-recording {
-  0%, 100% {
-    opacity: 1;
+@layer base {
+  body {
+    @apply bg-ink font-sans text-paper antialiased;
   }
-  50% {
-    opacity: 0.5;
+
+  ::selection {
+    background: rgba(168, 85, 247, 0.3);
+  }
+
+  :focus-visible {
+    outline: 2px solid #a855f7;
+    outline-offset: 2px;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #2a2a32;
+    border-radius: 3px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: #3a3a44;
   }
 }
 
-.recording-pulse {
-  animation: pulse-recording 1.5s ease-in-out infinite;
+@layer components {
+  /* Section headers: 9–10px mono caps, tracked */
+  .label-mono {
+    @apply font-mono text-[9px] font-semibold uppercase tracking-[0.18em] text-fog/60;
+  }
+
+  /* Neutral pill button (Close, Pause, secondary actions) */
+  .btn-pill {
+    @apply inline-flex h-8 items-center gap-1.5 rounded-full border border-line bg-card px-3 font-mono text-[11px] text-fog transition-colors hover:border-line-strong hover:text-paper disabled:opacity-40;
+  }
+
+  /* Red is only for REC / Stop / Export */
+  .btn-rec {
+    @apply inline-flex h-8 items-center gap-1.5 rounded-full bg-rec px-4 text-[11px] font-bold tracking-wide text-white shadow-rec transition-colors hover:bg-rec-hover disabled:opacity-50;
+  }
+
+  /* Gradient primary action */
+  .btn-accent {
+    @apply inline-flex items-center justify-center gap-2 rounded-full bg-accent-b font-semibold text-white shadow-orb transition-[filter,transform] hover:brightness-110 active:scale-[0.98] disabled:opacity-50;
+  }
+
+  .field {
+    @apply rounded-md border border-line bg-ink px-2 py-1 text-xs text-paper placeholder:text-fog/40 focus:border-violet/60 focus:outline-none;
+  }
+
+  /* Range input: gradient fill comes from --fill, white thumb with a violet halo */
+  .range {
+    @apply h-6 w-full cursor-pointer appearance-none bg-transparent;
+  }
+  .range::-webkit-slider-runnable-track {
+    height: 4px;
+    border-radius: 9999px;
+    background: linear-gradient(to right, #a855f7, #fb7c2c) 0 / var(--fill, 0%) 100% no-repeat, #2a2a32;
+  }
+  .range::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    margin-top: -7px;
+    height: 18px;
+    width: 18px;
+    border-radius: 9999px;
+    border: 2px solid #fff;
+    background: #fff;
+    box-shadow: 0 1px 6px rgba(0, 0, 0, 0.5), 0 0 0 3px rgba(168, 85, 247, 0.2);
+    transition: box-shadow 150ms;
+  }
+  .range:hover::-webkit-slider-thumb {
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.6), 0 0 0 4px rgba(168, 85, 247, 0.35);
+  }
+  .range:disabled {
+    cursor: default;
+  }
 }
 
-/* Button styles */
-.btn {
-  @apply px-4 py-2 rounded-lg font-medium transition-all duration-200 focus-ring;
-}
-
-.btn-primary {
-  @apply btn bg-primary-600 hover:bg-primary-700 text-white;
-}
-
-.btn-secondary {
-  @apply btn bg-gray-700 hover:bg-gray-600 text-gray-100;
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
